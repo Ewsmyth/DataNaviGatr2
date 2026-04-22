@@ -5,9 +5,50 @@ export function createDefaultFilterState(columns) {
   }, {});
 }
 
+export function getValueByPath(row, key) {
+  if (!row || !key) return undefined;
+
+  if (Object.prototype.hasOwnProperty.call(row, key)) {
+    return row[key];
+  }
+
+  return String(key)
+    .split(".")
+    .reduce((current, segment) => {
+      if (current === null || current === undefined) return undefined;
+
+      if (Array.isArray(current) && /^\d+$/.test(segment)) {
+        return current[Number(segment)];
+      }
+
+      return current[segment];
+    }, row);
+}
+
+export function formatCellValue(value) {
+  if (value === null || value === undefined) return "";
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (item === null || item === undefined) return "";
+        if (typeof item === "object") return JSON.stringify(item);
+        return String(item);
+      })
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return value;
+}
+
 export function inferColumnType(rows, key) {
   for (const row of rows) {
-    const value = row?.[key];
+    const value = getValueByPath(row, key);
     if (value === null || value === undefined || value === "") continue;
 
     if (typeof value === "number") return "number";
@@ -28,15 +69,21 @@ export function inferColumnType(rows, key) {
 }
 
 export function formatDynamicLabel(key) {
-  return String(key).replace(/([a-z0-9])([A-Z])/g, "$1_$2").toUpperCase();
+  return String(key)
+    .replace(/\./g, "_")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toUpperCase();
 }
 
 export function matchesFilter(rowValue, filter, columnType) {
   const operator = filter?.operator || "contains";
   const rawValue = filter?.value || "";
 
+  const formattedRowValue = formatCellValue(rowValue);
   const stringRowValue =
-    rowValue === null || rowValue === undefined ? "" : String(rowValue);
+    formattedRowValue === null || formattedRowValue === undefined
+      ? ""
+      : String(formattedRowValue);
   const normalizedRowValue = stringRowValue.toLowerCase();
   const normalizedFilterValue = String(rawValue).toLowerCase().trim();
 

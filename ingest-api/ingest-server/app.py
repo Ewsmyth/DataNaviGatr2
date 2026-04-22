@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -91,11 +92,158 @@ def normalize_ingest_payload(parsed_json):
     raise ValueError("JSON must be an object or an array of objects.")
 
 
+def first_dict(value):
+    if isinstance(value, list) and value and isinstance(value[0], dict):
+        return value[0]
+    return {}
+
+
+def copy_keys(source, keys):
+    return {key: source[key] for key in keys if key in source}
+
+
+def build_collection_location(location):
+    if not location:
+        return None
+
+    collection_location = copy_keys(
+        location,
+        [
+            "latitude",
+            "longitude",
+            "altitude",
+            "ecef_x",
+            "ecef_y",
+            "ecef_z",
+            "time",
+        ],
+    )
+    collection_location["meaning"] = "collector_system_location"
+    collection_location["note"] = (
+        "This is the collection platform/system location, not the tower, "
+        "phone, subscriber, or emitting-device location."
+    )
+    return collection_location
+
+
+def build_collection_geo(location):
+    if not location:
+        return None
+
+    latitude = location.get("latitude")
+    longitude = location.get("longitude")
+    if latitude is None or longitude is None:
+        return None
+
+    return {
+        "type": "Point",
+        "coordinates": [longitude, latitude],
+    }
+
+
+def build_collection_location_track(locations):
+    track = []
+    for location in locations:
+        if not isinstance(location, dict):
+            continue
+        track_location = build_collection_location(location)
+        if track_location:
+            track.append(track_location)
+    return track
+
+
+def build_source_fingerprint(doc):
+    payload = json.dumps(doc, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def normalize_gsm_document(doc):
+    attachments = doc.get("attachments") if isinstance(doc.get("attachments"), list) else []
+    primary_attachment = first_dict(attachments)
+    body = primary_attachment.get("body") if isinstance(primary_attachment.get("body"), dict) else {}
+
+    locations = doc.get("locations") if isinstance(doc.get("locations"), list) else []
+    collection_location_source = first_dict(locations)
+    collection_location = build_collection_location(collection_location_source)
+    collection_geo = build_collection_geo(collection_location_source)
+    collection_location_track = build_collection_location_track(locations)
+
+    normalized = {
+        "record_type": "gsm_event",
+        "source_format": "gsm_json_export",
+        "source_record_id": doc.get("id"),
+        "source_record_id_string": doc.get("id_string"),
+        "source_fingerprint": build_source_fingerprint(doc),
+        "collector_id": doc.get("collector_id"),
+        "platform_id": doc.get("platform_id"),
+        "signal_type": doc.get("signal_type"),
+        "status": doc.get("status"),
+        "start_time": doc.get("start_time"),
+        "end_time": doc.get("end_time"),
+        "frequency": doc.get("frequency"),
+        "bandwidth": doc.get("bandwidth"),
+        "rssi": doc.get("rssi"),
+        "attachment_id": primary_attachment.get("id"),
+        "intercept_id": primary_attachment.get("intercept_id"),
+        "attachment_source": primary_attachment.get("source"),
+        "intercept_type": body.get("intercept_type"),
+        "message_type": body.get("message_type"),
+        "mobile_identity": body.get("mobile_identity"),
+        "mobile_identity_type": body.get("mobile_identity_type"),
+        "mcc": body.get("MCC"),
+        "mnc": body.get("MNC"),
+        "lac": body.get("LAC"),
+        "cid": body.get("CID"),
+        "arfcn": body.get("ARFCN"),
+        "arfcn_c0": body.get("ARFCN_C0"),
+        "arfcns": body.get("ARFCNs"),
+        "neighbors": body.get("neighbors"),
+        "timeslot": body.get("timeslot"),
+        "sub_slot": body.get("sub_slot"),
+        "timing_advance": body.get("timing_advance"),
+        "cipher_key_sequence": body.get("cipher_key_sequence"),
+        "service_type": body.get("service_type"),
+        "bsic": body.get("BSIC"),
+        "ncc": body.get("NCC"),
+        "bcc": body.get("BCC"),
+        "t3212": body.get("T3212"),
+        "t3212_value": body.get("T3212_VAL"),
+        "crh": body.get("CRH"),
+        "crh_value": body.get("CRH_VAL"),
+        "cro": body.get("CRO"),
+        "cro_value": body.get("CRO_VAL"),
+        "collection_location": collection_location,
+        "collection_geo": collection_geo,
+        "collection_location_track": collection_location_track,
+        "collection_location_count": len(collection_location_track),
+        "collection_location_meaning": "collector_system_location",
+        "collection_location_warning": (
+            "Collection location is the collection platform/system location. "
+            "It is not the tower, phone, subscriber, or emitting-device location."
+        ),
+    }
+
+    return {key: value for key, value in normalized.items() if value is not None}
+
+
+def normalize_document(doc):
+    signal_type = str(doc.get("signal_type") or "").upper()
+    if signal_type == "GSM":
+        return normalize_gsm_document(doc)
+
+    return {
+        "record_type": "unknown_event",
+        "source_fingerprint": build_source_fingerprint(doc),
+        "signal_type": doc.get("signal_type"),
+    }
+
+
 def enrich_documents(documents, final_filename, collector_code, organization_code):
     ingested_at = datetime.now(timezone.utc).isoformat()
 
     for doc in documents:
         enriched_doc = dict(doc)
+        enriched_doc["normalized"] = normalize_document(doc)
         enriched_doc["_ingest"] = {
             "source_filename": final_filename,
             "collector_code": collector_code,

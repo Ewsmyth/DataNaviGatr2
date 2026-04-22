@@ -19,7 +19,9 @@ import { DEFAULT_COLUMNS } from "../data/queryTableColumns";
 import { FILTER_OPERATORS } from "../data/queryFilterOperators";
 import {
   createDefaultFilterState,
+  formatCellValue,
   formatDynamicLabel,
+  getValueByPath,
   inferColumnType,
   matchesFilter,
 } from "../utils/queryTableUtils";
@@ -280,7 +282,7 @@ function QueryTable({ query }) {
   const filteredRows = useMemo(() => {
     return tableRows.filter((row) =>
       columnConfig.every((column) =>
-        matchesFilter(row[column.key], filters[column.key], column.type)
+        matchesFilter(getValueByPath(row, column.key), filters[column.key], column.type)
       )
     );
   }, [tableRows, filters, columnConfig]);
@@ -289,8 +291,8 @@ function QueryTable({ query }) {
     const rows = [...filteredRows];
 
     rows.sort((a, b) => {
-      let valueA = a?.[sortConfig.key];
-      let valueB = b?.[sortConfig.key];
+      let valueA = getValueByPath(a, sortConfig.key);
+      let valueB = getValueByPath(b, sortConfig.key);
 
       const columnType =
         columnConfig.find((column) => column.key === sortConfig.key)?.type || "text";
@@ -305,8 +307,8 @@ function QueryTable({ query }) {
         valueA = Number.isNaN(numA) ? Number.NEGATIVE_INFINITY : numA;
         valueB = Number.isNaN(numB) ? Number.NEGATIVE_INFINITY : numB;
       } else {
-        valueA = String(valueA).toLowerCase();
-        valueB = String(valueB).toLowerCase();
+        valueA = String(formatCellValue(valueA)).toLowerCase();
+        valueB = String(formatCellValue(valueB)).toLowerCase();
       }
 
       if (valueA < valueB) return sortConfig.direction === "asc" ? -1 : 1;
@@ -504,9 +506,7 @@ function QueryTable({ query }) {
               <tr key={row?._id ?? `${query.id || "query"}-${index}`}>
                 {visibleColumns.map((column) => (
                   <td key={column.key}>
-                    {Array.isArray(row?.[column.key]) || (row?.[column.key] && typeof row?.[column.key] === "object")
-                      ? JSON.stringify(row?.[column.key])
-                      : row?.[column.key] ?? ""}
+                    {formatCellValue(getValueByPath(row, column.key))}
                   </td>
                 ))}
               </tr>

@@ -58,7 +58,7 @@ Routes:
 | `/api/upload` | ingest API compatibility route |
 | `/api/...` | datanav API |
 
-This keeps users from needing to memorize ports like `5000`, `5001`, or `8080`.
+This keeps users from needing to memorize internal service ports like `5000`, `5001`, or `5002`.
 
 ---
 
@@ -199,6 +199,164 @@ In Portainer:
 
 ```text
 Stacks → Add stack → Web editor → Paste docker-compose.yml → Deploy
+```
+
+### 4a. Copy/Paste Stack Script
+
+Paste this into the Portainer Stack web editor:
+
+```yaml
+services:
+  postgres:
+    image: postgres:16
+    container_name: datanav-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: datanav
+      POSTGRES_USER: datanav_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datanav_user -d datanav"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - datanavigatr_net
+
+  mongodb:
+    image: mongo:7.0
+    container_name: datanav-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-change-me-mongo}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet -u admin -p \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval 'db.adminCommand({ ping: 1 }).ok'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - datanavigatr_net
+
+  ingest-api:
+    image: ${IMAGE_NAMESPACE:-ghcr.io/your-github-username/datanavigatr2}/ingest-api:${IMAGE_TAG:-latest}
+    container_name: datanav-ingest-api
+    restart: unless-stopped
+    environment:
+      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD:-change-me-mongo}@mongodb:27017/ingestion_db?authSource=admin
+      MONGO_DB_NAME: ingestion_db
+      MONGO_COLLECTION_NAME: records
+      CORS_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost}
+      UPLOAD_TMP_DIR: /tmp/ingest_uploads
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
+      INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-1000}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - datanavigatr_net
+
+  datanav-api:
+    image: ${IMAGE_NAMESPACE:-ghcr.io/your-github-username/datanavigatr2}/datanav-api:${IMAGE_TAG:-latest}
+    container_name: datanav-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://datanav_user:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/datanav
+      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD:-change-me-mongo}@mongodb:27017/ingestion_db?authSource=admin
+      MONGO_DB_NAME: ingestion_db
+      SECRET_KEY: ${SECRET_KEY:-change-me-secret}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt}
+      ACCESS_TOKEN_EXPIRES_MINUTES: ${ACCESS_TOKEN_EXPIRES_MINUTES:-15}
+      REFRESH_TOKEN_EXPIRES_DAYS: ${REFRESH_TOKEN_EXPIRES_DAYS:-7}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-Lax}
+      DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME:-admin}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@local}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-ChangeMe123!}
+      CORS_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - datanavigatr_net
+
+  datanavigatr2:
+    image: ${IMAGE_NAMESPACE:-ghcr.io/your-github-username/datanavigatr2}/datanavigatr2:${IMAGE_TAG:-latest}
+    container_name: datanavigatr2
+    restart: unless-stopped
+    depends_on:
+      - datanav-api
+      - ingest-api
+    networks:
+      - datanavigatr_net
+
+  gateway:
+    image: nginx:1.27-alpine
+    container_name: datanav-gateway
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat > /etc/nginx/conf.d/default.conf <<'EOF'
+        server {
+          listen 80;
+          server_name _;
+          client_max_body_size 100m;
+
+          proxy_set_header Host $$host;
+          proxy_set_header X-Real-IP $$remote_addr;
+          proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $$scheme;
+
+          location = /api/ingest/upload {
+            proxy_pass http://ingest-api:5000/api/ingest/upload;
+          }
+
+          location /api/ingest/ {
+            proxy_pass http://ingest-api:5000/api/ingest/;
+          }
+
+          location = /api/upload {
+            proxy_pass http://ingest-api:5000/api/upload;
+          }
+
+          location /api/ {
+            proxy_pass http://datanav-api:5001;
+          }
+
+          location / {
+            proxy_pass http://datanavigatr2:5002;
+          }
+        }
+        EOF
+        nginx -g 'daemon off;'
+    depends_on:
+      - datanavigatr2
+      - datanav-api
+      - ingest-api
+    networks:
+      - datanavigatr_net
+
+volumes:
+  postgres_data:
+  mongo_data:
+
+networks:
+  datanavigatr_net:
+    driver: bridge
 ```
 
 ### 5. Open the System
@@ -345,9 +503,9 @@ Internally, the containers talk on the Docker network:
 
 | Service | Internal Port |
 |---|---:|
-| `datanavigatr2` | `80` |
-| `datanav-api` | `5001` |
 | `ingest-api` | `5000` |
+| `datanav-api` | `5001` |
+| `datanavigatr2` | `5002` |
 | `postgres` | `5432` |
 | `mongodb` | `27017` |
 
@@ -421,4 +579,3 @@ Clean separation between ingest, query, UI, and audit metadata.
 ```
 
 That is the shape of DataNaviGatr2.
-

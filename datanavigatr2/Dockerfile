@@ -24,4 +24,4 @@ FROM nginx:1.27-alpine
 COPY build-nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/build /usr/share/nginx/html
 
-EXPOSE 80
+EXPOSE 5002
