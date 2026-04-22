@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from flask_cors import CORS
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, request
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from werkzeug.utils import secure_filename
@@ -125,12 +125,17 @@ def insert_documents(documents):
 
 
 @app.get("/")
-@app.get("/upload")
-def upload_page():
-    return render_template("upload.html")
+def service_info():
+    return jsonify({
+        "service": "ingest-api",
+        "status": "ok",
+        "health": "/api/health",
+        "upload": "/api/ingest/upload",
+    }), 200
 
 
 @app.get("/api/health")
+@app.get("/api/ingest/health")
 def health():
     try:
         mongo_client.admin.command("ping")
