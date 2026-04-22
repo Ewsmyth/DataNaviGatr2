@@ -1,0 +1,215 @@
+.top-navbar {
+    height: 64px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 18px;
+    background: linear-gradient(135deg, var(--panel), var(--panel-2));
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    color: var(--text);
+    backdrop-filter: blur(14px);
+}
+
+.top-left-navbar-div,
+.top-right-navbar-div {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.return-link,
+.create-query-link,
+.profile-link {
+    color: var(--text);
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
+}
+
+.return-link {
+    font-size: 1.05rem;
+    letter-spacing: 0.3px;
+}
+
+.create-query-link {
+    font-size: 0.95rem;
+    color: var(--muted);
+    padding: 8px 12px;
+    border-radius: 10px;
+}
+
+.create-query-link:hover,
+.profile-link:hover {
+    color: var(--accent);
+}
+
+.create-query-link:hover {
+    background-color: var(--bg-soft);
+}
+
+.theme-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 42px;
+    width: 42px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-soft);
+    cursor: pointer;
+    transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.theme-button:hover {
+    transform: translateY(-1px);
+    border-color: var(--accent);
+    background-color: var(--panel);
+}
+
+.theme-icon,
+.profile-icon {
+    width: 22px;
+    height: 22px;
+    fill: var(--text);
+    transition: fill 0.2s ease;
+}
+
+.theme-button:hover .theme-icon,
+.profile-link:hover .profile-icon {
+    fill: var(--accent);
+}
+
+.profile-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 42px;
+    width: 42px;
+    border-radius: 12px;
+    background: transparent;
+    border: 1px solid transparent;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.profile-link:hover {
+    background-color: var(--bg-soft);
+    border-color: var(--border);
+}
+
+.create-query-button {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+}
+
+.profile-menu-wrapper {
+    position: relative;
+}
+
+.profile-menu-button {
+    cursor: pointer;
+}
+
+.profile-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 220px;
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    z-index: 120;
+    overflow: hidden;
+}
+
+.profile-dropdown-header {
+    padding: 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.profile-dropdown-title {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+}
+
+.profile-dropdown-subtitle {
+    font-size: 0.82rem;
+    color: var(--muted);
+    word-break: break-word;
+}
+
+.profile-dropdown-item {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    padding: 12px 14px;
+    cursor: pointer;
+    font-size: 0.92rem;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.profile-dropdown-item:hover {
+    background: var(--bg-soft);
+    color: var(--accent);
+}
+
+.profile-menu-wrapper {
+    position: relative;
+}
+
+.profile-menu-button {
+    cursor: pointer;
+}
+
+.profile-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 220px;
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    z-index: 120;
+    overflow: hidden;
+}
+
+.profile-dropdown-header {
+    padding: 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.profile-dropdown-title {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+}
+
+.profile-dropdown-subtitle {
+    font-size: 0.82rem;
+    color: var(--muted);
+    word-break: break-word;
+}
+
+.profile-dropdown-item {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    padding: 12px 14px;
+    cursor: pointer;
+    font-size: 0.92rem;
+}
+
+.profile-dropdown-item:hover {
+    background: var(--bg-soft);
+    color: var(--accent);
+}

@@ -1,0 +1,159 @@
+.auditing-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(3, 8, 18, 0.72);
+    backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    z-index: 1150;
+}
+
+.auditing-modal {
+    width: min(1100px, 100%);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+}
+
+.auditing-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 22px 24px;
+    border-bottom: 1px solid var(--border);
+}
+
+.auditing-modal-header h2 {
+    margin: 0 0 6px 0;
+}
+
+.auditing-modal-header p {
+    margin: 0;
+    color: var(--muted);
+}
+
+.auditing-modal-header-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.auditing-modal-close-button,
+.auditing-modal-refresh-button,
+.auditing-approve-button,
+.auditing-flag-button,
+.auditing-reset-button {
+    border-radius: 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+}
+
+.auditing-approve-button {
+    color: #86efac;
+    border-color: rgba(22, 163, 74, 0.35);
+}
+
+.auditing-flag-button {
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.auditing-modal-body {
+    padding: 24px;
+    overflow: auto;
+}
+
+.auditing-empty-state {
+    border: 1px dashed var(--border);
+    border-radius: 16px;
+    padding: 18px;
+    color: var(--muted);
+}
+
+.auditing-run-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.auditing-run-card {
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 18px;
+    background: rgba(255, 255, 255, 0.02);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.auditing-run-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.auditing-run-title {
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.auditing-run-meta {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.auditing-run-state {
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    border: 1px solid var(--border);
+    text-transform: capitalize;
+}
+
+.state-approved {
+    color: #86efac;
+    background: rgba(22, 163, 74, 0.12);
+}
+
+.state-flagged {
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.12);
+}
+
+.state-unreviewed {
+    color: var(--muted);
+    background: rgba(148, 163, 184, 0.12);
+}
+
+.auditing-run-section-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--muted);
+    margin-bottom: 6px;
+}
+
+.auditing-run-parameters pre {
+    margin: 0;
+    padding: 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.auditing-run-actions {
+    display: flex;
+    gap: 10px;
+}

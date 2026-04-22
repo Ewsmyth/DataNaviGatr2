@@ -1,0 +1,31 @@
+services:
+  mongodb:
+    image: mongo:7.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-change-me-mongo}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  ingest-api:
+    build:
+      context: ./ingest-server
+    restart: unless-stopped
+    environment:
+      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD:-change-me-mongo}@mongodb:27017/ingestion_db?authSource=admin
+      MONGO_DB_NAME: ingestion_db
+      MONGO_COLLECTION_NAME: records
+      CORS_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+      UPLOAD_TMP_DIR: /tmp/ingest_uploads
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
+      INGEST_BATCH_SIZE: ${INGEST_BATCH_SIZE:-1000}
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mongodb
+
+volumes:
+  mongo_data:

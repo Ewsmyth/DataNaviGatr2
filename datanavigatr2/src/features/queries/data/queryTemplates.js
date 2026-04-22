@@ -1,0 +1,47 @@
+export const DEFAULT_TEMPLATES = [
+  {
+    id: "signal-search",
+    name: "Signal Search",
+    description: "Search for signal activity by type, tags, frequency, and time window.",
+    fields: [
+      { key: "queryName", label: "Query Name", type: "text", placeholder: "Example: GSM intercept search" },
+      { key: "result_limit", label: "Results Limit", type: "select", options: ["1000", "5000", "10000", "20000", "40000", "50000", "100000"] },
+      { key: "signal_type", label: "Signal Type", type: "select", options: ["", "GSM", "UMTS", "LTE", "DMR", "P25"] },
+      { key: "tags", label: "Tags", type: "text", placeholder: "alpha, bravo, satcom" },
+      { key: "center_frequency_min", label: "Min Center Frequency", type: "number", placeholder: "850000000" },
+      { key: "center_frequency_max", label: "Max Center Frequency", type: "number", placeholder: "960000000" },
+      { key: "start_time", label: "Start Time", type: "datetime-local" },
+      { key: "end_time", label: "End Time", type: "datetime-local" },
+    ],
+  },
+  {
+    id: "device-lookup",
+    name: "Device Lookup",
+    description: "Search for devices using mobile identity details and network attributes.",
+    fields: [
+      { key: "queryName", label: "Query Name", type: "text", placeholder: "Example: IMSI lookup" },
+      { key: "result_limit", label: "Results Limit", type: "select", options: ["1000", "5000", "10000", "20000", "40000", "50000", "100000"] },
+      { key: "mobile_identity_type", label: "Mobile Identity Type", type: "select", options: ["", "IMSI", "IMEI", "TMSI"] },
+      { key: "mobile_identity", label: "Mobile Identity", type: "text", placeholder: "Examples: 310*, *310, *310*" },
+      { key: "MCC", label: "MCC", type: "number", placeholder: "310" },
+      { key: "MNC", label: "MNC", type: "number", placeholder: "260" },
+      { key: "LAC", label: "LAC", type: "number", placeholder: "Enter LAC..." },
+      { key: "CID", label: "CID", type: "number", placeholder: "Enter CID..." },
+    ],
+  },
+  {
+    id: "reject-cause-analysis",
+    name: "Reject Cause Analysis",
+    description: "Find records related to reject causes, message types, and intercept patterns.",
+    fields: [
+      { key: "queryName", label: "Query Name", type: "text", placeholder: "Example: Reject cause review" },
+      { key: "result_limit", label: "Results Limit", type: "select", options: ["1000", "5000", "10000", "20000", "40000", "50000", "100000"] },
+      { key: "message_type", label: "Message Type", type: "text", placeholder: "LOCATION_UPDATE_REQUEST" },
+      { key: "reject_cause", label: "Reject Cause", type: "text", placeholder: "Enter cause text..." },
+      { key: "reject_cause_id", label: "Reject Cause ID", type: "number", placeholder: "Enter numeric code..." },
+      { key: "intercept_type", label: "Intercept Type", type: "text", placeholder: "Passive / Active / etc." },
+      { key: "duration_min", label: "Min Duration", type: "number", placeholder: "0" },
+      { key: "rssi_min", label: "Min RSSI", type: "number", placeholder: "-90" },
+    ],
+  },
+];

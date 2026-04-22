@@ -1,0 +1,56 @@
+name: Publish Docker Images
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: datanav-api
+            context: datanav_api
+          - image: ingest-api
+            context: ingest-api/ingest-server
+          - image: datanavigatr2
+            context: datanavigatr2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare image namespace
+        run: echo "IMAGE_NAMESPACE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and publish ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:latest
+            ${{ env.IMAGE_NAMESPACE }}/${{ matrix.image }}:${{ github.sha }}
+          build-args: |
+            REACT_APP_API_BASE_URL=${{ vars.REACT_APP_API_BASE_URL || '' }}
+            REACT_APP_INGEST_BASE_URL=${{ vars.REACT_APP_INGEST_BASE_URL || '' }}
+            REACT_APP_PORTAINER_URL=${{ vars.REACT_APP_PORTAINER_URL || 'https://localhost:9443' }}
+            REACT_APP_MONGO_EXPRESS_URL=${{ vars.REACT_APP_MONGO_EXPRESS_URL || 'http://localhost:8081' }}
