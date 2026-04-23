@@ -12,4 +12,4 @@ COPY . .
 
 EXPOSE 5001
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--timeout", "300", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--timeout", "300", "app:create_app()"]
