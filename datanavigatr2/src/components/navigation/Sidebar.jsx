@@ -10,6 +10,8 @@ function Sidebar({
   onRequireLogin,
   onCreateProject,
   onAddFolder,
+  onDeleteProject,
+  onDeleteFolder,
 }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -82,6 +84,34 @@ function Sidebar({
     if (!folderName || !folderName.trim()) return;
 
     onAddFolder(projectId, folderName.trim());
+  }
+
+  async function deleteProject(projectId) {
+    if (!isAuthenticated) {
+      onRequireLogin("You need to log in to use this feature.");
+      return;
+    }
+
+    if (!hasUserRole) {
+      onRequireLogin("You need the user role to manage projects.");
+      return;
+    }
+
+    await onDeleteProject(projectId);
+  }
+
+  async function deleteFolder(projectId, folderId) {
+    if (!isAuthenticated) {
+      onRequireLogin("You need to log in to use this feature.");
+      return;
+    }
+
+    if (!hasUserRole) {
+      onRequireLogin("You need the user role to manage folders.");
+      return;
+    }
+
+    await onDeleteFolder(projectId, folderId);
   }
 
   return (
@@ -161,6 +191,16 @@ function Sidebar({
                       >
                         +
                       </button>
+
+                      <button
+                        className="delete-item-button"
+                        onClick={() => deleteProject(project.id)}
+                        type="button"
+                        aria-label={`Delete ${project.name}`}
+                        title="Delete project"
+                      >
+                        ×
+                      </button>
                     </div>
 
                     {project.isOpen && project.folders.length > 0 && (
@@ -172,15 +212,26 @@ function Sidebar({
                             selectedItem.folderId === folder.id;
 
                           return (
-                            <button
-                              className={`folder-item folder-select-button ${isFolderSelected ? "selected" : ""}`}
-                              key={folder.id}
-                              type="button"
-                              onClick={() => selectFolder(project.id, folder.id)}
-                            >
-                              <span className="folder-icon">📁</span>
-                              <span className="folder-name">{folder.name}</span>
-                            </button>
+                            <div className="folder-row" key={folder.id}>
+                              <button
+                                className={`folder-item folder-select-button ${isFolderSelected ? "selected" : ""}`}
+                                type="button"
+                                onClick={() => selectFolder(project.id, folder.id)}
+                              >
+                                <span className="folder-icon">📁</span>
+                                <span className="folder-name">{folder.name}</span>
+                              </button>
+
+                              <button
+                                className="delete-item-button folder-delete-button"
+                                onClick={() => deleteFolder(project.id, folder.id)}
+                                type="button"
+                                aria-label={`Delete ${folder.name}`}
+                                title="Delete folder"
+                              >
+                                ×
+                              </button>
+                            </div>
                           );
                         })}
                       </div>

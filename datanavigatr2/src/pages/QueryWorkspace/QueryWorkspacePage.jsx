@@ -423,6 +423,105 @@ function QueryWorkspacePage() {
     );
   }
 
+  async function handleDeleteProject(projectId) {
+    try {
+      const projectToDelete = projects.find((project) => project.id === projectId);
+      if (!projectToDelete) return;
+
+      const confirmed = window.confirm(
+        `Delete project "${projectToDelete.name}" and all folders and saved queries inside it?`
+      );
+      if (!confirmed) return;
+
+      const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to delete project.");
+      }
+
+      const remainingProjects = projects.filter((project) => project.id !== projectId);
+      setProjects(remainingProjects);
+      setSelectedQuery(null);
+
+      if (selectedItem.projectId === projectId) {
+        setSelectedItem(
+          remainingProjects.length > 0
+            ? {
+                type: "project",
+                projectId: remainingProjects[0].id,
+                folderId: null,
+              }
+            : {
+                type: "project",
+                projectId: null,
+                folderId: null,
+              }
+        );
+      }
+
+      setGlobalMessage(data.message || "Project deleted successfully.");
+    } catch (error) {
+      setGlobalMessage(error.message || "Failed to delete project.");
+    }
+  }
+
+  async function handleDeleteFolder(projectId, folderId) {
+    try {
+      const project = projects.find((item) => item.id === projectId);
+      const folderToDelete = project?.folders.find((folder) => folder.id === folderId);
+      if (!folderToDelete) return;
+
+      const confirmed = window.confirm(
+        `Delete folder "${folderToDelete.name}" and all saved queries inside it?`
+      );
+      if (!confirmed) return;
+
+      const response = await fetch(`${API_BASE_URL}/api/folders/${folderId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to delete folder.");
+      }
+
+      setProjects((prevProjects) =>
+        prevProjects.map((item) =>
+          item.id === projectId
+            ? {
+                ...item,
+                folders: item.folders.filter((folder) => folder.id !== folderId),
+              }
+            : item
+        )
+      );
+      setSelectedQuery(null);
+
+      if (selectedItem.type === "folder" && selectedItem.folderId === folderId) {
+        setSelectedItem({
+          type: "project",
+          projectId,
+          folderId: null,
+        });
+      }
+
+      setGlobalMessage(data.message || "Folder deleted successfully.");
+    } catch (error) {
+      setGlobalMessage(error.message || "Failed to delete folder.");
+    }
+  }
+
   function handleOpenNewQuery() {
     if (!isAuthenticated) {
       requireLogin("You need to log in to use this feature.");
@@ -537,6 +636,8 @@ function QueryWorkspacePage() {
           onRequireLogin={requireLogin}
           onCreateProject={handleCreateProject}
           onAddFolder={handleAddFolder}
+          onDeleteProject={handleDeleteProject}
+          onDeleteFolder={handleDeleteFolder}
         />
 
         <MainContent
@@ -550,6 +651,7 @@ function QueryWorkspacePage() {
           isAuthenticated={isAuthenticated}
           hasUserRole={hasUserRole}
           isDataLoading={isDataLoading}
+          accessToken={accessToken}
         />
       </div>
 

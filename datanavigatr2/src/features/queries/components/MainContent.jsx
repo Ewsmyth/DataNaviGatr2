@@ -13,6 +13,7 @@ function MainContent({
   isAuthenticated,
   hasUserRole,
   isDataLoading,
+  accessToken,
 }) {
   if (!isAuthenticated) {
     return (
@@ -96,7 +97,7 @@ function MainContent({
   if (selectedQuery) {
     return (
       <main className="app-main query-view-main">
-        <QueryTable query={selectedQuery} />
+        <QueryTable query={selectedQuery} accessToken={accessToken} />
       </main>
     );
   }

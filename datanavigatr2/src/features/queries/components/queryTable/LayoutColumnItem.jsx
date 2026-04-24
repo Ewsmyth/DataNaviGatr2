@@ -2,7 +2,7 @@ import React from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-function SortableColumnItem({ column, onToggleVisibility }) {
+function LayoutColumnItem({ column, containerId }) {
   const {
     attributes,
     listeners,
@@ -10,7 +10,13 @@ function SortableColumnItem({ column, onToggleVisibility }) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: column.key });
+  } = useSortable({
+    id: column.key,
+    data: {
+      containerId,
+      type: "column",
+    },
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -21,11 +27,11 @@ function SortableColumnItem({ column, onToggleVisibility }) {
     <div
       ref={setNodeRef}
       style={style}
-      className={`column-settings-item ${isDragging ? "column-settings-item-dragging" : ""}`}
+      className={`layout-column-item ${isDragging ? "layout-column-item-dragging" : ""}`}
     >
       <button
         type="button"
-        className="column-drag-handle-button"
+        className="layout-column-handle"
         aria-label={`Drag ${column.label}`}
         {...attributes}
         {...listeners}
@@ -33,16 +39,12 @@ function SortableColumnItem({ column, onToggleVisibility }) {
         ☰
       </button>
 
-      <label className="column-settings-label">
-        <input
-          type="checkbox"
-          checked={column.visible}
-          onChange={() => onToggleVisibility(column.key)}
-        />
-        <span>{column.label}</span>
-      </label>
+      <div className="layout-column-content">
+        <span className="layout-column-label">{column.label}</span>
+        <span className="layout-column-key">{column.key}</span>
+      </div>
     </div>
   );
 }
 
-export default SortableColumnItem;
+export default LayoutColumnItem;

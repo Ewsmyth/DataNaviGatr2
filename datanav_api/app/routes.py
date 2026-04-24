@@ -10,6 +10,7 @@ from .models import (
     Role,
     SavedQuery,
     SavedQueryResult,
+    TableLayout,
     User,
 )
 from .security import (
@@ -296,6 +297,83 @@ def create_folder(project_id):
     }), 201
 
 
+def _delete_query_runs_for_saved_queries(saved_query_ids):
+    if not saved_query_ids:
+        return 0
+
+    deleted_count = (
+        QueryRun.query
+        .filter(QueryRun.saved_query_id.in_(saved_query_ids))
+        .delete(synchronize_session=False)
+    )
+    return deleted_count or 0
+
+
+@api_bp.route("/api/projects/<project_id>", methods=["DELETE"])
+@token_required
+@require_role("user")
+def delete_project(project_id):
+    project = Project.query.filter_by(id=project_id, owner_id=g.current_user.id).first()
+    if not project:
+        return jsonify({"error": "Project not found."}), 404
+
+    saved_query_ids = list({query.id for query in project.saved_queries})
+
+    try:
+        deleted_query_runs = _delete_query_runs_for_saved_queries(saved_query_ids)
+        db.session.delete(project)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"error": f"Failed to delete project: {str(exc)}"}), 500
+
+    return jsonify({
+        "message": "Project deleted successfully.",
+        "deleted": {
+            "projectId": project_id,
+            "savedQueryCount": len(saved_query_ids),
+            "queryRunCount": deleted_query_runs,
+        },
+    }), 200
+
+
+@api_bp.route("/api/folders/<folder_id>", methods=["DELETE"])
+@token_required
+@require_role("user")
+def delete_folder(folder_id):
+    folder = (
+        Folder.query
+        .join(Project, Folder.project_id == Project.id)
+        .filter(
+            Folder.id == folder_id,
+            Project.owner_id == g.current_user.id,
+        )
+        .first()
+    )
+    if not folder:
+        return jsonify({"error": "Folder not found."}), 404
+
+    saved_query_ids = [query.id for query in folder.saved_queries]
+
+    try:
+        deleted_query_runs = _delete_query_runs_for_saved_queries(saved_query_ids)
+        db.session.delete(folder)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"error": f"Failed to delete folder: {str(exc)}"}), 500
+
+    return jsonify({
+        "message": "Folder deleted successfully.",
+        "deleted": {
+            "folderId": folder_id,
+            "projectId": folder.project_id,
+            "savedQueryCount": len(saved_query_ids),
+            "queryRunCount": deleted_query_runs,
+        },
+    }), 200
+
+
 @api_bp.route("/api/queries", methods=["POST"])
 @token_required
 @require_role("user")
@@ -428,6 +506,61 @@ def get_saved_query(query_id):
     return jsonify({
         "query": saved_query.to_detail_dict()
     }), 200
+
+
+@api_bp.route("/api/table-layouts", methods=["GET"])
+@token_required
+@require_role("user")
+def list_table_layouts():
+    layouts = (
+        TableLayout.query
+        .filter_by(user_id=g.current_user.id)
+        .order_by(TableLayout.created_at.desc())
+        .all()
+    )
+    return jsonify({"layouts": [layout.to_dict() for layout in layouts]}), 200
+
+
+@api_bp.route("/api/table-layouts", methods=["POST"])
+@token_required
+@require_role("user")
+def create_table_layout():
+    payload = request.get_json() or {}
+    name = (payload.get("name") or "").strip()
+    columns = payload.get("columns") or []
+
+    if not name:
+        return jsonify({"error": "Layout name is required."}), 400
+
+    if not isinstance(columns, list) or len(columns) == 0:
+        return jsonify({"error": "At least one visible column is required."}), 400
+
+    normalized_columns = []
+    seen = set()
+    for value in columns:
+        if not isinstance(value, str):
+            return jsonify({"error": "Layout columns must be strings."}), 400
+        key = value.strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        normalized_columns.append(key)
+
+    if not normalized_columns:
+        return jsonify({"error": "At least one valid visible column is required."}), 400
+
+    layout = TableLayout(
+        user_id=g.current_user.id,
+        name=name,
+        columns_json=normalized_columns,
+    )
+    db.session.add(layout)
+    db.session.commit()
+
+    return jsonify({
+        "message": "Layout saved successfully.",
+        "layout": layout.to_dict(),
+    }), 201
 
 
 @api_bp.route("/api/admin/users", methods=["GET"])
