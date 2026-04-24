@@ -46,6 +46,13 @@ class User(db.Model):
         cascade="all, delete-orphan"
     )
 
+    table_layouts = db.relationship(
+        "TableLayout",
+        back_populates="user",
+        lazy=True,
+        cascade="all, delete-orphan"
+    )
+
     def has_role(self, role_name: str) -> bool:
         return any(role.name == role_name for role in self.roles)
 
@@ -258,4 +265,24 @@ class QueryRun(db.Model):
             "auditor_notes": self.auditor_notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "user": self.user.to_dict() if self.user else None,
+        }
+
+
+class TableLayout(db.Model):
+    __tablename__ = "table_layouts"
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey("users.id"), nullable=False, index=True)
+    name = db.Column(db.String(255), nullable=False)
+    columns_json = db.Column(db.JSON, nullable=False, default=list)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=utcnow)
+
+    user = db.relationship("User", back_populates="table_layouts")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "columns": self.columns_json or [],
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }

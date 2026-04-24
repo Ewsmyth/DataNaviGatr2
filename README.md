@@ -247,7 +247,7 @@ services:
       - datanavigatr_net
 
   ingest-api:
-    image: ${IMAGE_NAMESPACE:-ghcr.io/your-github-username/datanavigatr2}/ingest-api:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAMESPACE:-ghcr.io/ewsmyth/datanavigatr2}/ingest-api:${IMAGE_TAG:-latest}
     container_name: datanav-ingest-api
     restart: unless-stopped
     environment:
@@ -265,7 +265,7 @@ services:
       - datanavigatr_net
 
   datanav-api:
-    image: ${IMAGE_NAMESPACE:-ghcr.io/your-github-username/datanavigatr2}/datanav-api:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAMESPACE:-ghcr.io/ewsmyth/datanavigatr2}/datanav-api:${IMAGE_TAG:-latest}
     container_name: datanav-api
     restart: unless-stopped
     environment:
@@ -291,7 +291,7 @@ services:
       - datanavigatr_net
 
   datanavigatr2:
-    image: ${IMAGE_NAMESPACE:-ghcr.io/your-github-username/datanavigatr2}/datanavigatr2:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAMESPACE:-ghcr.io/ewsmyth/datanavigatr2}/datanavigatr2:${IMAGE_TAG:-latest}
     container_name: datanavigatr2
     restart: unless-stopped
     depends_on:
