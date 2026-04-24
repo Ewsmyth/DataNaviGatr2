@@ -444,7 +444,9 @@ function QueryTable({ query, accessToken }) {
     }
 
     setVisibleColumnKeys(normalizedKeys);
-    setLayoutMessage(`Applied layout with ${normalizedKeys.length} visible column${normalizedKeys.length === 1 ? "" : "s"}.`);
+    setLayoutMessage(
+      `Applied layout with ${normalizedKeys.length} visible column${normalizedKeys.length === 1 ? "" : "s"}.`
+    );
   }
 
   async function handleSaveLayout() {
