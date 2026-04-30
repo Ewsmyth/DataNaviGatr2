@@ -1,5 +1,17 @@
 export const DEFAULT_TEMPLATES = [
   {
+    id: "custom-query-builder",
+    name: "Custom Query Builder",
+    description: "Build a query from table columns with nested AND/OR condition groups.",
+    builder: "custom",
+    fields: [
+      { key: "queryName", label: "Query Name", type: "text", placeholder: "Example: Custom review" },
+      { key: "result_limit", label: "Results Limit", type: "select", options: ["1000", "5000", "10000", "20000", "40000", "50000", "100000"] },
+      { key: "start_time", label: "Start Date and Time", type: "datetime-local" },
+      { key: "end_time", label: "End Date and Time", type: "datetime-local" },
+    ],
+  },
+  {
     id: "signal-search",
     name: "Signal Search",
     description: "Search for signal activity by type, tags, frequency, and time window.",

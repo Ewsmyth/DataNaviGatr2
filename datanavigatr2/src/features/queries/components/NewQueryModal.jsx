@@ -1,7 +1,225 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "./NewQueryModal.css";
 import { DEFAULT_TEMPLATES } from "../data/queryTemplates";
+import { DEFAULT_COLUMNS } from "../data/queryTableColumns";
+import { FILTER_OPERATORS } from "../data/queryFilterOperators";
 import { buildInitialValues } from "../utils/queryForm";
+
+const DEFAULT_CUSTOM_OPERATOR = "contains";
+const CUSTOM_OPERATOR_OPTIONS = FILTER_OPERATORS;
+
+function createCondition() {
+  const column = DEFAULT_COLUMNS[0] || { key: "", label: "", type: "text" };
+
+  return {
+    type: "condition",
+    column: column.key,
+    columnType: column.type || "text",
+    operator: DEFAULT_CUSTOM_OPERATOR,
+    value: "",
+  };
+}
+
+function createGroup() {
+  return {
+    type: "group",
+    operator: "and",
+    rules: [],
+  };
+}
+
+function updateRuleAtPath(rule, path, updater) {
+  if (path.length === 0) {
+    return updater(rule);
+  }
+
+  const [index, ...rest] = path;
+  return {
+    ...rule,
+    rules: (rule.rules || []).map((child, childIndex) =>
+      childIndex === index ? updateRuleAtPath(child, rest, updater) : child
+    ),
+  };
+}
+
+function removeRuleAtPath(rule, path) {
+  if (path.length === 0) {
+    return rule;
+  }
+
+  const [index, ...rest] = path;
+  if (rest.length === 0) {
+    return {
+      ...rule,
+      rules: (rule.rules || []).filter((_, childIndex) => childIndex !== index),
+    };
+  }
+
+  return {
+    ...rule,
+    rules: (rule.rules || []).map((child, childIndex) =>
+      childIndex === index ? removeRuleAtPath(child, rest) : child
+    ),
+  };
+}
+
+function CustomQueryGroup({ group, path = [], depth = 0, onChange }) {
+  const rules = group.rules || [];
+
+  function updateCurrentGroup(updater) {
+    onChange((current) => updateRuleAtPath(current, path, updater));
+  }
+
+  function updateChild(childPath, updater) {
+    onChange((current) => updateRuleAtPath(current, childPath, updater));
+  }
+
+  function removeChild(childPath) {
+    onChange((current) => removeRuleAtPath(current, childPath));
+  }
+
+  return (
+    <div className="custom-query-group" style={{ "--group-depth": depth }}>
+      <div className="custom-query-group-header">
+        <label className="custom-query-joiner">
+          <span>Match</span>
+          <select
+            value={group.operator || "and"}
+            onChange={(event) =>
+              updateCurrentGroup((currentGroup) => ({
+                ...currentGroup,
+                operator: event.target.value,
+              }))
+            }
+          >
+            <option value="and">All conditions (AND)</option>
+            <option value="or">Any condition (OR)</option>
+          </select>
+        </label>
+
+        <div className="custom-query-group-actions">
+          <button
+            type="button"
+            className="new-query-secondary-button compact"
+            onClick={() =>
+              updateCurrentGroup((currentGroup) => ({
+                ...currentGroup,
+                rules: [...(currentGroup.rules || []), createCondition()],
+              }))
+            }
+          >
+            Add Field
+          </button>
+
+          <button
+            type="button"
+            className="new-query-secondary-button compact"
+            onClick={() =>
+              updateCurrentGroup((currentGroup) => ({
+                ...currentGroup,
+                rules: [...(currentGroup.rules || []), createGroup()],
+              }))
+            }
+          >
+            Add Group
+          </button>
+        </div>
+      </div>
+
+      {rules.length === 0 ? (
+        <div className="custom-query-empty">Add a field or group to start filtering.</div>
+      ) : (
+        <div className="custom-query-rules">
+          {rules.map((rule, index) => {
+            const childPath = [...path, index];
+
+            if (rule.type === "group") {
+              return (
+                <div className="custom-query-nested-group" key={childPath.join("-")}>
+                  <CustomQueryGroup
+                    group={rule}
+                    path={childPath}
+                    depth={depth + 1}
+                    onChange={onChange}
+                  />
+                  <button
+                    type="button"
+                    className="custom-query-remove-button"
+                    onClick={() => removeChild(childPath)}
+                  >
+                    Remove Group
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="custom-query-condition" key={childPath.join("-")}>
+                <select
+                  value={rule.column || ""}
+                  onChange={(event) => {
+                    const selectedColumn = DEFAULT_COLUMNS.find(
+                      (column) => column.key === event.target.value
+                    );
+                    updateChild(childPath, (currentRule) => ({
+                      ...currentRule,
+                      column: event.target.value,
+                      columnType: selectedColumn?.type || "text",
+                    }));
+                  }}
+                >
+                  {DEFAULT_COLUMNS.map((column) => (
+                    <option key={column.key} value={column.key}>
+                      {column.label}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={rule.operator || DEFAULT_CUSTOM_OPERATOR}
+                  onChange={(event) =>
+                    updateChild(childPath, (currentRule) => ({
+                      ...currentRule,
+                      operator: event.target.value,
+                    }))
+                  }
+                >
+                  {CUSTOM_OPERATOR_OPTIONS.map((operator) => (
+                    <option key={operator.value} value={operator.value}>
+                      {operator.label}
+                    </option>
+                  ))}
+                </select>
+
+                <input
+                  type="text"
+                  value={rule.value || ""}
+                  placeholder="Value"
+                  disabled={["is_empty", "is_not_empty"].includes(rule.operator)}
+                  onChange={(event) =>
+                    updateChild(childPath, (currentRule) => ({
+                      ...currentRule,
+                      value: event.target.value,
+                    }))
+                  }
+                />
+
+                <button
+                  type="button"
+                  className="custom-query-icon-button"
+                  onClick={() => removeChild(childPath)}
+                  aria-label="Remove condition"
+                >
+                  x
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function NewQueryModal({ isOpen, onClose, onSubmit, templates = DEFAULT_TEMPLATES, projects = [], selectedItem, }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState(templates[0]?.id || "");
@@ -70,6 +288,14 @@ function NewQueryModal({ isOpen, onClose, onSubmit, templates = DEFAULT_TEMPLATE
     setFormValues((prev) => ({
       ...prev,
       [fieldKey]: value
+    }));
+  }
+
+  function handleCustomFilterChange(updater) {
+    setFormValues((prev) => ({
+      ...prev,
+      custom_filter:
+        typeof updater === "function" ? updater(prev.custom_filter || createGroup()) : updater,
     }));
   }
 
@@ -211,6 +437,16 @@ function NewQueryModal({ isOpen, onClose, onSubmit, templates = DEFAULT_TEMPLATE
                   </label>
                 ))}
               </div>
+
+              {selectedTemplate.builder === "custom" && (
+                <div className="custom-query-builder">
+                  <div className="custom-query-builder-title">Conditions</div>
+                  <CustomQueryGroup
+                    group={formValues.custom_filter || createGroup()}
+                    onChange={handleCustomFilterChange}
+                  />
+                </div>
+              )}
 
               <div className="new-query-preview-payload">
                 <div className="new-query-preview-payload-title">Payload Preview</div>

@@ -388,6 +388,92 @@ def _build_range_match(paths, minimum=None, maximum=None):
     return _or_across_paths(paths, condition)
 
 
+def _escape_regex(value):
+    return re.escape(str(value).strip())
+
+
+def _is_safe_custom_field(field):
+    if not field:
+        return False
+    return all(segment and not segment.startswith("$") for segment in str(field).split("."))
+
+
+def _build_custom_condition(rule):
+    field = str(rule.get("column") or "").strip()
+    operator = rule.get("operator") or "contains"
+    value = rule.get("value")
+    column_type = rule.get("columnType") or "text"
+
+    if not _is_safe_custom_field(field):
+        return None
+
+    if operator == "is_empty":
+        return {"$or": [{field: {"$exists": False}}, {field: None}, {field: ""}]}
+
+    if operator == "is_not_empty":
+        return {"$and": [{field: {"$exists": True}}, {field: {"$nin": [None, ""]}}]}
+
+    if value in [None, ""]:
+        return None
+
+    text_value = str(value).strip()
+    if not text_value:
+        return None
+
+    if operator in ["equals", "not_equals"] and column_type == "number":
+        match_value = _coerce_number(text_value)
+    else:
+        match_value = text_value
+
+    if operator == "equals":
+        return {field: match_value}
+    if operator == "not_equals":
+        return {field: {"$ne": match_value}}
+    if operator == "contains":
+        return {field: {"$regex": _escape_regex(text_value), "$options": "i"}}
+    if operator == "not_contains":
+        return {field: {"$not": {"$regex": _escape_regex(text_value), "$options": "i"}}}
+    if operator == "starts_with":
+        return {field: {"$regex": f"^{_escape_regex(text_value)}", "$options": "i"}}
+    if operator == "ends_with":
+        return {field: {"$regex": f"{_escape_regex(text_value)}$", "$options": "i"}}
+    if operator in ["greater_than", "less_than"]:
+        match_value = _coerce_number(text_value) if column_type == "number" else text_value
+        mongo_operator = "$gt" if operator == "greater_than" else "$lt"
+        return {field: {mongo_operator: match_value}}
+
+    return None
+
+
+def _build_custom_group(group):
+    if not isinstance(group, dict):
+        return None
+
+    rules = group.get("rules") or []
+    clauses = []
+
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+
+        if rule.get("type") == "group":
+            clause = _build_custom_group(rule)
+        else:
+            clause = _build_custom_condition(rule)
+
+        if clause:
+            clauses.append(clause)
+
+    if not clauses:
+        return None
+
+    if len(clauses) == 1:
+        return clauses[0]
+
+    operator = "$or" if group.get("operator") == "or" else "$and"
+    return {operator: clauses}
+
+
 def _finalize_filter(mongo_filter):
     clauses = mongo_filter.get("$and", [])
     if not clauses:
@@ -507,7 +593,32 @@ def build_reject_cause_analysis(parameters: dict):
     }
 
 
+def build_custom_query_builder(parameters: dict):
+    mongo_filter = {}
+
+    result_limit = parse_result_limit(parameters.get("result_limit"))
+
+    start_time = parse_datetime_local(parameters.get("start_time"))
+    end_time = parse_datetime_local(parameters.get("end_time"))
+    _merge_clause(
+        mongo_filter,
+        _build_range_match(["normalized.start_time"], minimum=start_time, maximum=end_time),
+    )
+
+    custom_filter = _build_custom_group(parameters.get("custom_filter") or {})
+    _merge_clause(mongo_filter, custom_filter)
+
+    return {
+        "collection": "records",
+        "filter": _finalize_filter(mongo_filter),
+        "projection": None,
+        "sort": [("normalized.start_time", -1)],
+        "limit": result_limit,
+    }
+
+
 TRANSLATORS = {
+    "custom-query-builder": build_custom_query_builder,
     "signal-search": build_signal_search,
     "device-lookup": build_device_lookup,
     "reject-cause-analysis": build_reject_cause_analysis,
