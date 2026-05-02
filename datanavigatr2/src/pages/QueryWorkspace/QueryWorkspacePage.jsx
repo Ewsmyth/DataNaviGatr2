@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import TopNavbar from "../../components/navigation/TopNavBar";
 import Sidebar from "../../components/navigation/Sidebar";
@@ -11,6 +11,7 @@ import "../../App.css";
 
 const API_BASE_URL =
   process.env.REACT_APP_API_BASE_URL ?? "";
+const QUERY_RESULTS_BATCH_SIZE = 250;
 
 function QueryWorkspacePage() {
   const navigate = useNavigate();
@@ -41,6 +42,12 @@ function QueryWorkspacePage() {
   });
 
   const [selectedQuery, setSelectedQuery] = useState(null);
+  const [queryLoadingProgress, setQueryLoadingProgress] = useState({
+    isLoading: false,
+    loaded: 0,
+    total: 0,
+  });
+  const queryResultsAbortRef = useRef(null);
 
   const isAuthenticated = Boolean(accessToken && currentUser);
   const roles = currentUser?.roles || [];
@@ -59,6 +66,12 @@ function QueryWorkspacePage() {
       sessionStorage.removeItem("accessToken");
     }
   }, [accessToken]);
+
+  useEffect(() => {
+    return () => {
+      queryResultsAbortRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     async function loadCurrentUser() {
@@ -175,6 +188,9 @@ function QueryWorkspacePage() {
   }
 
   async function handleLogout() {
+    queryResultsAbortRef.current?.abort();
+    queryResultsAbortRef.current = null;
+
     try {
       await fetch(`${API_BASE_URL}/api/auth/logout`, {
         method: "POST",
@@ -188,6 +204,11 @@ function QueryWorkspacePage() {
     setUsers([]);
     setQueryRuns([]);
     setSelectedQuery(null);
+    setQueryLoadingProgress({
+      isLoading: false,
+      loaded: 0,
+      total: 0,
+    });
     setSelectedItem({
       type: "project",
       projectId: null,
@@ -198,11 +219,22 @@ function QueryWorkspacePage() {
   }
 
   async function handleOpenQuery(queryId) {
+    queryResultsAbortRef.current?.abort();
+    const abortController = new AbortController();
+    queryResultsAbortRef.current = abortController;
+    setGlobalMessage("");
+    setQueryLoadingProgress({
+      isLoading: true,
+      loaded: 0,
+      total: 0,
+    });
+
     try {
       const response = await fetch(`${API_BASE_URL}/api/queries/${queryId}`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
+        signal: abortController.signal,
       });
 
       const data = await response.json();
@@ -211,9 +243,80 @@ function QueryWorkspacePage() {
         throw new Error(data.error || "Failed to load query.");
       }
 
-      setSelectedQuery(data.query);
+      const queryMetadata = {
+        ...data.query,
+        tableData: [],
+      };
+      const totalResults = Number(queryMetadata.resultCount || 0);
+
+      setSelectedQuery(queryMetadata);
+      setQueryLoadingProgress({
+        isLoading: totalResults > 0,
+        loaded: 0,
+        total: totalResults,
+      });
+
+      let nextOffset = 0;
+
+      while (nextOffset < totalResults) {
+        const resultsResponse = await fetch(
+          `${API_BASE_URL}/api/queries/${queryId}/results?offset=${nextOffset}&limit=${QUERY_RESULTS_BATCH_SIZE}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+            signal: abortController.signal,
+          }
+        );
+
+        const resultsData = await resultsResponse.json();
+
+        if (!resultsResponse.ok) {
+          throw new Error(resultsData.error || "Failed to load query results.");
+        }
+
+        const newRows = resultsData.results || [];
+        nextOffset = resultsData.nextOffset ?? nextOffset + newRows.length;
+
+        setSelectedQuery((currentQuery) => {
+          if (!currentQuery || currentQuery.id !== queryId) {
+            return currentQuery;
+          }
+
+          return {
+            ...currentQuery,
+            tableData: [...(currentQuery.tableData || []), ...newRows],
+          };
+        });
+
+        setQueryLoadingProgress({
+          isLoading: Boolean(resultsData.hasMore),
+          loaded: nextOffset,
+          total: resultsData.total ?? totalResults,
+        });
+
+        if (!resultsData.hasMore || newRows.length === 0) {
+          break;
+        }
+      }
+
+      if (queryResultsAbortRef.current === abortController) {
+        queryResultsAbortRef.current = null;
+        setQueryLoadingProgress((current) => ({
+          ...current,
+          isLoading: false,
+        }));
+      }
     } catch (error) {
+      if (error.name === "AbortError") {
+        return;
+      }
+
       setGlobalMessage(error.message || "Failed to load query.");
+      setQueryLoadingProgress((current) => ({
+        ...current,
+        isLoading: false,
+      }));
     }
   }
 
@@ -645,6 +748,7 @@ function QueryWorkspacePage() {
           selectedProject={selectedProject}
           selectedFolder={selectedFolder}
           selectedQuery={selectedQuery}
+          queryLoadingProgress={queryLoadingProgress}
           setSelectedItem={setSelectedItem}
           setSelectedQuery={setSelectedQuery}
           onOpenQuery={handleOpenQuery}

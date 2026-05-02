@@ -30,8 +30,11 @@ const API_BASE_URL = process.env.REACT_APP_API_BASE_URL ?? "";
 const AVAILABLE_CONTAINER_ID = "available-columns";
 const VISIBLE_CONTAINER_ID = "visible-columns";
 
-function QueryTable({ query, accessToken }) {
+function QueryTable({ query, accessToken, loadingProgress }) {
   const tableRows = query.tableData || [];
+  const loadedResultCount = loadingProgress?.loaded ?? tableRows.length;
+  const totalResultCount = loadingProgress?.total ?? query.resultCount ?? tableRows.length;
+  const isLoadingResults = Boolean(loadingProgress?.isLoading);
 
   const derivedColumns = useMemo(() => {
     const knownKeys = new Set(DEFAULT_COLUMNS.map((column) => column.key));
@@ -771,6 +774,11 @@ function QueryTable({ query, accessToken }) {
         </div>
 
         <div className="query-table-summary">
+          <span className="query-load-progress">
+            {isLoadingResults && <span className="query-load-spinner" aria-hidden="true" />}
+            {loadedResultCount} of {totalResultCount} loaded
+          </span>
+
           {activeFilterCount > 0 && (
             <span className="active-filter-count">
               {activeFilterCount} filter{activeFilterCount === 1 ? "" : "s"} active

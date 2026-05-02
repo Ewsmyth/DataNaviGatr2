@@ -7,6 +7,7 @@ function MainContent({
   selectedProject,
   selectedFolder,
   selectedQuery,
+  queryLoadingProgress,
   setSelectedItem,
   setSelectedQuery,
   onOpenQuery,
@@ -97,7 +98,11 @@ function MainContent({
   if (selectedQuery) {
     return (
       <main className="app-main query-view-main">
-        <QueryTable query={selectedQuery} accessToken={accessToken} />
+        <QueryTable
+          query={selectedQuery}
+          accessToken={accessToken}
+          loadingProgress={queryLoadingProgress}
+        />
       </main>
     );
   }

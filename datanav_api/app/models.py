@@ -191,14 +191,14 @@ class SavedQuery(db.Model):
             "tableData": [],
         }
 
-    def to_detail_dict(self):
-        return {
+    def to_detail_dict(self, include_table_data=True):
+        detail = {
             "id": self.id,
             "name": self.name,
             "creator": self.creator.username if self.creator else "unknown",
             "resultCount": self.result_count,
             "createdAt": self.created_at.date().isoformat() if self.created_at else None,
-            "tableData": [item.preview_json for item in self.result_items],
+            "tableData": [],
             "templateId": self.template_id,
             "parameters": self.parameters_json,
             "mongoCollection": self.mongo_collection,
@@ -207,6 +207,11 @@ class SavedQuery(db.Model):
             "translatedSort": self.translated_sort_json,
             "snapshotCreatedAt": self.snapshot_created_at.isoformat() if self.snapshot_created_at else None,
         }
+
+        if include_table_data:
+            detail["tableData"] = [item.preview_json for item in self.result_items]
+
+        return detail
 
 
 class SavedQueryResult(db.Model):

@@ -504,7 +504,61 @@ def get_saved_query(query_id):
         return jsonify({"error": "Query not found."}), 404
 
     return jsonify({
-        "query": saved_query.to_detail_dict()
+        "query": saved_query.to_detail_dict(include_table_data=False)
+    }), 200
+
+
+@api_bp.route("/api/queries/<query_id>/results", methods=["GET"])
+@token_required
+@require_role("user")
+def get_saved_query_results(query_id):
+    saved_query = (
+        SavedQuery.query
+        .join(Project, SavedQuery.project_id == Project.id)
+        .filter(
+            SavedQuery.id == query_id,
+            Project.owner_id == g.current_user.id
+        )
+        .first()
+    )
+
+    if not saved_query:
+        return jsonify({"error": "Query not found."}), 404
+
+    try:
+        offset = int(request.args.get("offset", 0))
+        limit = int(request.args.get("limit", 250))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Offset and limit must be whole numbers."}), 400
+
+    if offset < 0:
+        return jsonify({"error": "Offset must be 0 or greater."}), 400
+
+    if limit < 1:
+        return jsonify({"error": "Limit must be at least 1."}), 400
+
+    limit = min(limit, 250)
+
+    result_items = (
+        SavedQueryResult.query
+        .filter_by(saved_query_id=saved_query.id)
+        .order_by(SavedQueryResult.position)
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    rows = [item.preview_json for item in result_items]
+    next_offset = offset + len(rows)
+
+    return jsonify({
+        "queryId": saved_query.id,
+        "offset": offset,
+        "limit": limit,
+        "count": len(rows),
+        "total": saved_query.result_count,
+        "nextOffset": next_offset,
+        "hasMore": next_offset < saved_query.result_count,
+        "results": rows,
     }), 200
 
 
