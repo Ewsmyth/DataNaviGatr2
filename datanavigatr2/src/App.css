@@ -154,7 +154,8 @@ body {
   color: var(--muted);
 }
 
-.ingest-file-field input {
+.ingest-file-field input,
+.ingest-file-field select {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -163,6 +164,80 @@ body {
   padding: 12px;
   font-size: 0.95rem;
   outline: none;
+}
+
+.ingest-default-gps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ingest-checkbox-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.ingest-checkbox-field input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.ingest-info-tooltip {
+  position: relative;
+  display: inline-flex;
+  color: var(--muted);
+  cursor: help;
+}
+
+.ingest-info-tooltip:hover,
+.ingest-info-tooltip:focus {
+  color: var(--accent);
+}
+
+.ingest-tooltip-text {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  width: min(280px, calc(100vw - 48px));
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(4px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  z-index: 3;
+}
+
+.ingest-info-tooltip:hover .ingest-tooltip-text,
+.ingest-info-tooltip:focus .ingest-tooltip-text {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.ingest-default-gps-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ingest-gps-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .ingest-page-actions {
@@ -203,6 +278,10 @@ body {
 
 @media (max-width: 700px) {
   .landing-button-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ingest-gps-grid {
     grid-template-columns: 1fr;
   }
 }

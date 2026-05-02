@@ -65,11 +65,14 @@ function QueryTable({ query, accessToken }) {
     DEFAULT_COLUMNS.map((column) => column.key)
   );
   const [filters, setFilters] = useState(() => createDefaultFilterState(DEFAULT_COLUMNS));
-  const [sortConfig, setSortConfig] = useState({
+  const [sortConfigs, setSortConfigs] = useState([{
     key: DEFAULT_COLUMNS[0]?.key || "_id",
     direction: "asc",
-  });
+  }]);
   const [activeFilterColumn, setActiveFilterColumn] = useState(null);
+  const [activeColumnMenu, setActiveColumnMenu] = useState(null);
+  const [groupedColumnKeys, setGroupedColumnKeys] = useState([]);
+  const [expandedGroupKeys, setExpandedGroupKeys] = useState(() => new Set());
   const [layoutsOpen, setLayoutsOpen] = useState(false);
   const [activeDraggedColumnKey, setActiveDraggedColumnKey] = useState(null);
   const [savedLayouts, setSavedLayouts] = useState([]);
@@ -79,6 +82,7 @@ function QueryTable({ query, accessToken }) {
   const [isSavingLayout, setIsSavingLayout] = useState(false);
 
   const filterPopupRef = useRef(null);
+  const columnMenuRef = useRef(null);
   const layoutsPopupRef = useRef(null);
 
   const sensors = useSensors(
@@ -123,22 +127,28 @@ function QueryTable({ query, accessToken }) {
       return next;
     });
 
-    setSortConfig((current) => {
-      if (columnMap.has(current.key)) {
-        return current;
-      }
+    setSortConfigs((current) =>
+      current.filter((config) => columnMap.has(config.key))
+    );
 
-      return {
-        key: derivedColumns[0]?.key || "_id",
-        direction: "asc",
-      };
-    });
+    setGroupedColumnKeys((current) => current.filter((key) => columnMap.has(key)));
 
     setActiveFilterColumn((current) => {
       if (!current) return current;
       return columnMap.has(current) ? current : null;
     });
   }, [derivedColumns, columnMap]);
+
+  useEffect(() => {
+    setGroupedColumnKeys((current) =>
+      current.filter((key) => visibleColumnKeys.includes(key))
+    );
+
+    setActiveColumnMenu((current) => {
+      if (!current) return current;
+      return visibleColumnKeys.includes(current) ? current : null;
+    });
+  }, [visibleColumnKeys]);
 
   useEffect(() => {
     if (!accessToken) {
@@ -190,6 +200,13 @@ function QueryTable({ query, accessToken }) {
       }
 
       if (
+        columnMenuRef.current &&
+        !columnMenuRef.current.contains(event.target)
+      ) {
+        setActiveColumnMenu(null);
+      }
+
+      if (
         layoutsPopupRef.current &&
         !layoutsPopupRef.current.contains(event.target)
       ) {
@@ -200,6 +217,7 @@ function QueryTable({ query, accessToken }) {
     function handleEscape(event) {
       if (event.key === "Escape") {
         setActiveFilterColumn(null);
+        setActiveColumnMenu(null);
         setLayoutsOpen(false);
       }
     }
@@ -247,61 +265,157 @@ function QueryTable({ query, accessToken }) {
     const rows = [...filteredRows];
 
     rows.sort((a, b) => {
-      let valueA = getValueByPath(a, sortConfig.key);
-      let valueB = getValueByPath(b, sortConfig.key);
+      for (const sortConfig of sortConfigs) {
+        let valueA = getValueByPath(a, sortConfig.key);
+        let valueB = getValueByPath(b, sortConfig.key);
 
-      const columnType = columnMap.get(sortConfig.key)?.type || "text";
+        const columnType = columnMap.get(sortConfig.key)?.type || "text";
 
-      if (valueA === null || valueA === undefined) valueA = "";
-      if (valueB === null || valueB === undefined) valueB = "";
+        if (valueA === null || valueA === undefined) valueA = "";
+        if (valueB === null || valueB === undefined) valueB = "";
 
-      if (columnType === "number") {
-        const numA = Number(valueA);
-        const numB = Number(valueB);
+        if (columnType === "number") {
+          const numA = Number(valueA);
+          const numB = Number(valueB);
 
-        valueA = Number.isNaN(numA) ? Number.NEGATIVE_INFINITY : numA;
-        valueB = Number.isNaN(numB) ? Number.NEGATIVE_INFINITY : numB;
-      } else {
-        valueA = String(formatCellValue(valueA)).toLowerCase();
-        valueB = String(formatCellValue(valueB)).toLowerCase();
+          valueA = Number.isNaN(numA) ? Number.NEGATIVE_INFINITY : numA;
+          valueB = Number.isNaN(numB) ? Number.NEGATIVE_INFINITY : numB;
+        } else {
+          valueA = String(formatCellValue(valueA)).toLowerCase();
+          valueB = String(formatCellValue(valueB)).toLowerCase();
+        }
+
+        if (valueA < valueB) return sortConfig.direction === "asc" ? -1 : 1;
+        if (valueA > valueB) return sortConfig.direction === "asc" ? 1 : -1;
       }
 
-      if (valueA < valueB) return sortConfig.direction === "asc" ? -1 : 1;
-      if (valueA > valueB) return sortConfig.direction === "asc" ? 1 : -1;
       return 0;
     });
 
     return rows;
-  }, [filteredRows, sortConfig, columnMap]);
+  }, [filteredRows, sortConfigs, columnMap]);
+
+  const groupedRows = useMemo(() => {
+    if (groupedColumnKeys.length === 0) {
+      return [];
+    }
+
+    const groups = new Map();
+
+    sortedRows.forEach((row) => {
+      const values = {};
+      const keyParts = groupedColumnKeys.map((columnKey) => {
+        const formattedValue = formatCellValue(getValueByPath(row, columnKey));
+        const displayValue = String(formattedValue || "").trim() || "Blank";
+        values[columnKey] = displayValue;
+        return displayValue;
+      });
+      const groupKey = JSON.stringify(keyParts);
+
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          type: "group",
+          key: groupKey,
+          values,
+          rows: [],
+        });
+      }
+
+      groups.get(groupKey).rows.push(row);
+    });
+
+    return Array.from(groups.values());
+  }, [sortedRows, groupedColumnKeys]);
+
+  const displayRows = useMemo(() => {
+    if (groupedColumnKeys.length === 0) {
+      return sortedRows.map((row, index) => ({
+        type: "row",
+        row,
+        key: row?._id ?? `${query.id || "query"}-${index}`,
+      }));
+    }
+
+    return groupedRows.flatMap((group) => {
+      const rows = [group];
+      if (expandedGroupKeys.has(group.key)) {
+        group.rows.forEach((row, index) => {
+          rows.push({
+            type: "child",
+            row,
+            key: `${group.key}-${row?._id ?? index}`,
+          });
+        });
+      }
+      return rows;
+    });
+  }, [expandedGroupKeys, groupedColumnKeys.length, groupedRows, query.id, sortedRows]);
+
+  const displayedResultCount =
+    groupedColumnKeys.length > 0 ? groupedRows.length : sortedRows.length;
 
   const activeFilterCount = derivedColumns.filter((column) =>
     hasActiveFilter(column.key)
   ).length;
 
   function handleSort(columnKey) {
-    setSortConfig((current) => {
-      if (current.key === columnKey) {
-        return {
-          key: columnKey,
-          direction: current.direction === "asc" ? "desc" : "asc",
-        };
+    setSortConfigs((current) => {
+      const existingConfig = current.find((config) => config.key === columnKey);
+
+      if (!existingConfig) {
+        return [...current, { key: columnKey, direction: "asc" }];
       }
 
-      return {
-        key: columnKey,
-        direction: "asc",
-      };
+      if (existingConfig.direction === "asc") {
+        return current.map((config) =>
+          config.key === columnKey ? { ...config, direction: "desc" } : config
+        );
+      }
+
+      return current.filter((config) => config.key !== columnKey);
     });
   }
 
   function getSortIndicator(columnKey) {
-    if (sortConfig.key !== columnKey) return "↕";
-    return sortConfig.direction === "asc" ? "▲" : "▼";
+    const sortIndex = sortConfigs.findIndex((config) => config.key === columnKey);
+    if (sortIndex === -1) return "↕";
+    const direction = sortConfigs[sortIndex].direction === "asc" ? "▲" : "▼";
+    return `${direction}${sortConfigs.length > 1 ? sortIndex + 1 : ""}`;
   }
 
-  function toggleFilterMenu(columnKey) {
-    setActiveFilterColumn((current) => (current === columnKey ? null : columnKey));
+  function toggleColumnMenu(columnKey) {
+    setActiveColumnMenu((current) => (current === columnKey ? null : columnKey));
     setLayoutsOpen(false);
+  }
+
+  function openFilterModal(columnKey) {
+    setActiveFilterColumn(columnKey);
+    setActiveColumnMenu(null);
+    setLayoutsOpen(false);
+  }
+
+  function toggleGroupColumn(columnKey) {
+    setGroupedColumnKeys((current) => {
+      if (current.includes(columnKey)) {
+        return current.filter((key) => key !== columnKey);
+      }
+
+      return [...current, columnKey];
+    });
+    setExpandedGroupKeys(new Set());
+    setActiveColumnMenu(null);
+  }
+
+  function toggleGroupExpanded(groupKey) {
+    setExpandedGroupKeys((current) => {
+      const next = new Set(current);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+      return next;
+    });
   }
 
   function updateFilter(columnKey, updates) {
@@ -524,6 +638,7 @@ function QueryTable({ query, accessToken }) {
               onClick={() => {
                 setLayoutsOpen((current) => !current);
                 setActiveFilterColumn(null);
+                setActiveColumnMenu(null);
                 setLayoutMessage("");
               }}
             >
@@ -651,7 +766,7 @@ function QueryTable({ query, accessToken }) {
           </div>
 
           <span className="query-results">
-            {sortedRows.length} of {query.resultCount} results
+            {displayedResultCount} of {query.resultCount} results
           </span>
         </div>
 
@@ -668,8 +783,15 @@ function QueryTable({ query, accessToken }) {
         <table className="query-results-table">
           <thead>
             <tr>
+              {groupedColumnKeys.length > 0 && (
+                <th className="group-toggle-header" aria-label="Grouped rows" />
+              )}
+
               {visibleColumns.map((column) => (
-                <th key={column.key}>
+                <th
+                  key={column.key}
+                  className={groupedColumnKeys.includes(column.key) ? "grouped-column-header" : ""}
+                >
                   <div className="header-cell">
                     <button
                       type="button"
@@ -684,85 +806,54 @@ function QueryTable({ query, accessToken }) {
 
                     <div
                       className="header-filter-wrap"
-                      ref={activeFilterColumn === column.key ? filterPopupRef : null}
+                      ref={activeColumnMenu === column.key ? columnMenuRef : null}
                     >
                       <button
                         type="button"
                         className={`filter-header-button ${
-                          hasActiveFilter(column.key)
+                          hasActiveFilter(column.key) || groupedColumnKeys.includes(column.key)
                             ? "filter-header-button-active"
                             : ""
                         }`}
                         onClick={(event) => {
                           event.stopPropagation();
-                          toggleFilterMenu(column.key);
+                          toggleColumnMenu(column.key);
                         }}
-                        aria-label={`Filter ${column.label}`}
+                        aria-label={`Column options for ${column.label}`}
                       >
-                        ⛃
+                        ⋯
                       </button>
 
-                      {activeFilterColumn === column.key && (
+                      {activeColumnMenu === column.key && (
                         <div
-                          className="filter-popup"
+                          className="column-menu-popup"
                           onClick={(event) => event.stopPropagation()}
                         >
-                          <div className="filter-popup-title">
-                            Filter {column.label}
-                          </div>
-
-                          <label className="filter-field">
-                            <span>Condition</span>
-                            <select
-                              value={filters[column.key]?.operator || "contains"}
-                              onChange={(event) =>
-                                updateFilter(column.key, {
-                                  operator: event.target.value,
-                                })
-                              }
-                            >
-                              {FILTER_OPERATORS.map((operator) => (
-                                <option key={operator.value} value={operator.value}>
-                                  {operator.label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-
-                          {!["is_empty", "is_not_empty"].includes(
-                            filters[column.key]?.operator || "contains"
-                          ) && (
-                            <label className="filter-field">
-                              <span>Value</span>
-                              <input
-                                type={column.type === "number" ? "number" : "text"}
-                                value={filters[column.key]?.value || ""}
-                                onChange={(event) =>
-                                  updateFilter(column.key, {
-                                    value: event.target.value,
-                                  })
-                                }
-                                placeholder={`Enter ${column.label.toLowerCase()}...`}
-                              />
-                            </label>
-                          )}
-
-                          <div className="filter-popup-actions">
-                            <button
-                              type="button"
-                              className="filter-action-button filter-clear-button"
-                              onClick={() => clearFilter(column.key)}
-                            >
-                              Clear
-                            </button>
-                            <button
-                              type="button"
-                              className="filter-action-button filter-close-button"
-                              onClick={() => setActiveFilterColumn(null)}
-                            >
-                              Done
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            className="column-menu-item"
+                            onClick={() => openFilterModal(column.key)}
+                          >
+                            Filter
+                          </button>
+                          <button
+                            type="button"
+                            className={`column-menu-item ${
+                              groupedColumnKeys.includes(column.key)
+                                ? "column-menu-item-active"
+                                : ""
+                            }`}
+                            onClick={() => toggleGroupColumn(column.key)}
+                          >
+                            Group
+                          </button>
+                          <button
+                            type="button"
+                            className="column-menu-item column-menu-item-disabled"
+                            disabled
+                          >
+                            SARNEG
+                          </button>
                         </div>
                       )}
                     </div>
@@ -773,19 +864,67 @@ function QueryTable({ query, accessToken }) {
           </thead>
 
           <tbody>
-            {sortedRows.map((row, index) => (
-              <tr key={row?._id ?? `${query.id || "query"}-${index}`}>
-                {visibleColumns.map((column) => (
-                  <td key={column.key}>
-                    {formatCellValue(getValueByPath(row, column.key))}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {displayRows.map((displayRow) => {
+              if (displayRow.type === "group") {
+                const isExpanded = expandedGroupKeys.has(displayRow.key);
 
-            {sortedRows.length === 0 && (
+                return (
+                  <tr key={displayRow.key} className="query-group-row">
+                    <td className="group-toggle-cell">
+                      <button
+                        type="button"
+                        className="group-toggle-button"
+                        onClick={() => toggleGroupExpanded(displayRow.key)}
+                        aria-label={isExpanded ? "Collapse group" : "Expand group"}
+                      >
+                        {isExpanded ? "▾" : "▸"}
+                      </button>
+                    </td>
+
+                    {visibleColumns.map((column) => {
+                      const isGroupedColumn = groupedColumnKeys.includes(column.key);
+                      return (
+                        <td
+                          key={column.key}
+                          className={isGroupedColumn ? "grouped-column-cell" : ""}
+                        >
+                          {isGroupedColumn && (
+                            <span className="group-summary-value">
+                              {displayRow.values[column.key]}
+                              <span className="group-record-count">
+                                {displayRow.rows.length} record
+                                {displayRow.rows.length === 1 ? "" : "s"}
+                              </span>
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              }
+
+              return (
+                <tr
+                  key={displayRow.key}
+                  className={displayRow.type === "child" ? "query-group-child-row" : ""}
+                >
+                  {groupedColumnKeys.length > 0 && <td className="group-toggle-cell" />}
+                  {visibleColumns.map((column) => (
+                    <td key={column.key}>
+                      {formatCellValue(getValueByPath(displayRow.row, column.key))}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+
+            {displayRows.length === 0 && (
               <tr>
-                <td colSpan={visibleColumns.length} className="query-table-empty">
+                <td
+                  colSpan={visibleColumns.length + (groupedColumnKeys.length > 0 ? 1 : 0)}
+                  className="query-table-empty"
+                >
                   No results match the current filters.
                 </td>
               </tr>
@@ -793,6 +932,91 @@ function QueryTable({ query, accessToken }) {
           </tbody>
         </table>
       </div>
+
+      {activeFilterColumn && (
+        <div className="filter-modal-backdrop" role="presentation">
+          <div
+            className="filter-modal"
+            ref={filterPopupRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="filter-modal-title"
+          >
+            <div className="filter-modal-header">
+              <h3 id="filter-modal-title">
+                Filter {columnMap.get(activeFilterColumn)?.label || "column"}
+              </h3>
+              <button
+                type="button"
+                className="filter-modal-close"
+                onClick={() => setActiveFilterColumn(null)}
+                aria-label="Close filter"
+              >
+                ×
+              </button>
+            </div>
+
+            <label className="filter-field">
+              <span>Condition</span>
+              <select
+                value={filters[activeFilterColumn]?.operator || "contains"}
+                onChange={(event) =>
+                  updateFilter(activeFilterColumn, {
+                    operator: event.target.value,
+                  })
+                }
+              >
+                {FILTER_OPERATORS.map((operator) => (
+                  <option key={operator.value} value={operator.value}>
+                    {operator.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {!["is_empty", "is_not_empty"].includes(
+              filters[activeFilterColumn]?.operator || "contains"
+            ) && (
+              <label className="filter-field">
+                <span>Value</span>
+                <input
+                  type={
+                    columnMap.get(activeFilterColumn)?.type === "number"
+                      ? "number"
+                      : "text"
+                  }
+                  value={filters[activeFilterColumn]?.value || ""}
+                  onChange={(event) =>
+                    updateFilter(activeFilterColumn, {
+                      value: event.target.value,
+                    })
+                  }
+                  placeholder={`Enter ${(
+                    columnMap.get(activeFilterColumn)?.label || "value"
+                  ).toLowerCase()}...`}
+                />
+              </label>
+            )}
+
+            <div className="filter-popup-actions">
+              <button
+                type="button"
+                className="filter-action-button filter-clear-button"
+                onClick={() => clearFilter(activeFilterColumn)}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                className="filter-action-button filter-close-button"
+                onClick={() => setActiveFilterColumn(null)}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

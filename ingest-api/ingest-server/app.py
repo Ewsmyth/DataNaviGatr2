@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 import hashlib
@@ -90,6 +91,307 @@ def normalize_ingest_payload(parsed_json):
             raise ValueError("JSON array must contain only objects.")
         return parsed_json
     raise ValueError("JSON must be an object or an array of objects.")
+
+
+def parse_float(value, label):
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a number.")
+
+
+def parse_int(value, label):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"{label} must be a whole number.")
+
+
+def parse_altitude(values):
+    altitude = values.get("altitude")
+    if altitude is None or str(altitude).strip() == "":
+        return 0.0
+    return parse_float(altitude, "Altitude")
+
+
+def validate_lat_lon(latitude, longitude):
+    if not -90 <= latitude <= 90:
+        raise ValueError("Latitude must be between -90 and 90.")
+    if not -180 <= longitude <= 180:
+        raise ValueError("Longitude must be between -180 and 180.")
+
+
+def parse_dms(value, label):
+    text = str(value or "").strip().upper()
+    direction_match = re.search(r"([NSEW])$", text)
+    direction = direction_match.group(1) if direction_match else ""
+    numbers = re.findall(r"[-+]?\d+(?:\.\d+)?", text)
+    if not numbers:
+        raise ValueError(f"{label} must include degrees.")
+
+    degrees = float(numbers[0])
+    minutes = float(numbers[1]) if len(numbers) > 1 else 0.0
+    seconds = float(numbers[2]) if len(numbers) > 2 else 0.0
+    if minutes < 0 or minutes >= 60 or seconds < 0 or seconds >= 60:
+        raise ValueError(f"{label} minutes and seconds must be less than 60.")
+
+    sign = -1 if degrees < 0 else 1
+    if direction in ("S", "W"):
+        sign = -1
+    if direction in ("N", "E"):
+        sign = 1
+
+    return sign * (abs(degrees) + (minutes / 60) + (seconds / 3600))
+
+
+def utm_to_lat_lon(zone, hemisphere, easting, northing):
+    if not 1 <= zone <= 60:
+        raise ValueError("UTM zone must be between 1 and 60.")
+
+    hemisphere = str(hemisphere or "").strip().upper()
+    if hemisphere not in ("N", "S"):
+        raise ValueError("UTM hemisphere must be N or S.")
+
+    a = 6378137.0
+    eccentricity_squared = 0.00669438
+    k0 = 0.9996
+    eccentricity_prime_squared = eccentricity_squared / (1 - eccentricity_squared)
+    e1 = (1 - math.sqrt(1 - eccentricity_squared)) / (
+        1 + math.sqrt(1 - eccentricity_squared)
+    )
+
+    x = easting - 500000.0
+    y = northing
+    if hemisphere == "S":
+        y -= 10000000.0
+
+    longitude_origin = (zone - 1) * 6 - 180 + 3
+    m = y / k0
+    mu = m / (
+        a
+        * (
+            1
+            - eccentricity_squared / 4
+            - 3 * eccentricity_squared**2 / 64
+            - 5 * eccentricity_squared**3 / 256
+        )
+    )
+
+    phi1_rad = (
+        mu
+        + (3 * e1 / 2 - 27 * e1**3 / 32) * math.sin(2 * mu)
+        + (21 * e1**2 / 16 - 55 * e1**4 / 32) * math.sin(4 * mu)
+        + (151 * e1**3 / 96) * math.sin(6 * mu)
+    )
+
+    n1 = a / math.sqrt(1 - eccentricity_squared * math.sin(phi1_rad) ** 2)
+    t1 = math.tan(phi1_rad) ** 2
+    c1 = eccentricity_prime_squared * math.cos(phi1_rad) ** 2
+    r1 = (
+        a
+        * (1 - eccentricity_squared)
+        / (1 - eccentricity_squared * math.sin(phi1_rad) ** 2) ** 1.5
+    )
+    d = x / (n1 * k0)
+
+    latitude = phi1_rad - (
+        n1
+        * math.tan(phi1_rad)
+        / r1
+        * (
+            d**2 / 2
+            - (5 + 3 * t1 + 10 * c1 - 4 * c1**2 - 9 * eccentricity_prime_squared)
+            * d**4
+            / 24
+            + (
+                61
+                + 90 * t1
+                + 298 * c1
+                + 45 * t1**2
+                - 252 * eccentricity_prime_squared
+                - 3 * c1**2
+            )
+            * d**6
+            / 720
+        )
+    )
+    longitude = (
+        d
+        - (1 + 2 * t1 + c1) * d**3 / 6
+        + (
+            5
+            - 2 * c1
+            + 28 * t1
+            - 3 * c1**2
+            + 8 * eccentricity_prime_squared
+            + 24 * t1**2
+        )
+        * d**5
+        / 120
+    ) / math.cos(phi1_rad)
+
+    return math.degrees(latitude), longitude_origin + math.degrees(longitude)
+
+
+def mgrs_to_utm(mgrs_value):
+    text = re.sub(r"\s+", "", str(mgrs_value or "").upper())
+    match = re.fullmatch(r"(\d{1,2})([C-HJ-NP-X])([A-HJ-NP-Z]{2})(\d*)", text)
+    if not match:
+        raise ValueError("MGRS must look like 51QYU0700046000.")
+
+    zone = int(match.group(1))
+    band = match.group(2)
+    square = match.group(3)
+    digits = match.group(4)
+    if len(digits) % 2 != 0 or len(digits) > 10:
+        raise ValueError("MGRS numeric precision must have an even number of digits up to 10.")
+
+    easting_letters = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    northing_letters = "ABCDEFGHJKLMNPQRSTUV"
+    set_column = (zone - 1) % 3
+    easting_sets = ("ABCDEFGH", "JKLMNPQR", "STUVWXYZ")
+    column = easting_sets[set_column].index(square[0]) + 1
+    easting = column * 100000.0
+
+    row = northing_letters.index(square[1])
+    northing = row * 100000.0
+    if zone % 2 == 0:
+        northing = ((row + 5) % 20) * 100000.0
+
+    precision = len(digits) // 2
+    if precision:
+        scale = 10 ** (5 - precision)
+        easting += int(digits[:precision]) * scale
+        northing += int(digits[precision:]) * scale
+
+    band_min_lat = "CDEFGHJKLMNPQRSTUVWX".index(band) * 8 - 80
+    hemisphere = "N" if band >= "N" else "S"
+    min_northing = 0 if hemisphere == "N" else 10000000
+    band_min_northing = lat_to_utm_northing(band_min_lat, zone)
+    if hemisphere == "S":
+        band_min_northing += 10000000
+
+    while northing < band_min_northing:
+        northing += 2000000
+    if hemisphere == "S" and northing < min_northing:
+        northing += 10000000
+
+    return zone, hemisphere, easting, northing
+
+
+def lat_to_utm_northing(latitude, zone):
+    central_meridian = math.radians((zone - 1) * 6 - 180 + 3)
+    lat_rad = math.radians(latitude)
+    lon_rad = central_meridian
+    a = 6378137.0
+    eccentricity_squared = 0.00669438
+    k0 = 0.9996
+    eccentricity_prime_squared = eccentricity_squared / (1 - eccentricity_squared)
+    n = a / math.sqrt(1 - eccentricity_squared * math.sin(lat_rad) ** 2)
+    t = math.tan(lat_rad) ** 2
+    c = eccentricity_prime_squared * math.cos(lat_rad) ** 2
+    longitude_delta = math.cos(lat_rad) * (lon_rad - central_meridian)
+    m = a * (
+        (1 - eccentricity_squared / 4 - 3 * eccentricity_squared**2 / 64 - 5 * eccentricity_squared**3 / 256)
+        * lat_rad
+        - (3 * eccentricity_squared / 8 + 3 * eccentricity_squared**2 / 32 + 45 * eccentricity_squared**3 / 1024)
+        * math.sin(2 * lat_rad)
+        + (15 * eccentricity_squared**2 / 256 + 45 * eccentricity_squared**3 / 1024)
+        * math.sin(4 * lat_rad)
+        - (35 * eccentricity_squared**3 / 3072) * math.sin(6 * lat_rad)
+    )
+    return k0 * (
+        m
+        + n
+        * math.tan(lat_rad)
+        * (
+            longitude_delta**2 / 2
+            + (5 - t + 9 * c + 4 * c**2) * longitude_delta**4 / 24
+            + (61 - 58 * t + t**2 + 600 * c - 330 * eccentricity_prime_squared)
+            * longitude_delta**6
+            / 720
+        )
+    )
+
+
+def lat_lon_alt_to_ecef(latitude, longitude, altitude):
+    a = 6378137.0
+    eccentricity_squared = 6.69437999014e-3
+    lat_rad = math.radians(latitude)
+    lon_rad = math.radians(longitude)
+    prime_vertical_radius = a / math.sqrt(
+        1 - eccentricity_squared * math.sin(lat_rad) ** 2
+    )
+
+    return {
+        "ecef_x": (prime_vertical_radius + altitude)
+        * math.cos(lat_rad)
+        * math.cos(lon_rad),
+        "ecef_y": (prime_vertical_radius + altitude)
+        * math.cos(lat_rad)
+        * math.sin(lon_rad),
+        "ecef_z": (
+            prime_vertical_radius * (1 - eccentricity_squared) + altitude
+        )
+        * math.sin(lat_rad),
+    }
+
+
+def build_default_location(default_location_payload, record_time=None):
+    if not default_location_payload:
+        return None
+
+    payload_type = str(default_location_payload.get("type") or "").strip()
+    values = default_location_payload.get("values")
+    if not isinstance(values, dict):
+        raise ValueError("Default GPS values are required.")
+
+    altitude = parse_altitude(values)
+    if payload_type == "decimal_degrees":
+        latitude = parse_float(values.get("latitude"), "Latitude")
+        longitude = parse_float(values.get("longitude"), "Longitude")
+    elif payload_type == "dms":
+        latitude = parse_dms(values.get("latitude"), "Latitude")
+        longitude = parse_dms(values.get("longitude"), "Longitude")
+    elif payload_type == "utm":
+        latitude, longitude = utm_to_lat_lon(
+            parse_int(values.get("zone"), "UTM zone"),
+            values.get("hemisphere"),
+            parse_float(values.get("easting"), "UTM easting"),
+            parse_float(values.get("northing"), "UTM northing"),
+        )
+    elif payload_type == "mgrs":
+        latitude, longitude = utm_to_lat_lon(*mgrs_to_utm(values.get("mgrs")))
+    else:
+        raise ValueError("Default GPS type must be latitude/longitude, DMS, UTM, or MGRS.")
+
+    validate_lat_lon(latitude, longitude)
+    location = {
+        "altitude": altitude,
+        "latitude": latitude,
+        "longitude": longitude,
+        "time": record_time or datetime.now(timezone.utc).isoformat(),
+    }
+    location.update(lat_lon_alt_to_ecef(latitude, longitude, altitude))
+    return location
+
+
+def parse_default_location_payload(raw_value):
+    if not raw_value:
+        return None
+    try:
+        payload = json.loads(raw_value)
+    except json.JSONDecodeError:
+        raise ValueError("Default GPS payload must be valid JSON.")
+    if not isinstance(payload, dict):
+        raise ValueError("Default GPS payload must be an object.")
+    build_default_location(payload)
+    return payload
+
+
+def document_has_locations(doc):
+    locations = doc.get("locations")
+    return isinstance(locations, list) and any(isinstance(item, dict) for item in locations)
 
 
 def first_dict(value):
@@ -238,12 +540,32 @@ def normalize_document(doc):
     }
 
 
-def enrich_documents(documents, final_filename, collector_code, organization_code):
+def add_default_location_if_missing(doc, default_location_payload):
+    if not default_location_payload or document_has_locations(doc):
+        return doc
+
+    enriched_doc = dict(doc)
+    default_location = build_default_location(
+        default_location_payload,
+        record_time=doc.get("start_time") or doc.get("end_time"),
+    )
+    default_location["source"] = "ingest_default_gps"
+    enriched_doc["locations"] = [default_location]
+    return enriched_doc
+
+
+def enrich_documents(
+    documents,
+    final_filename,
+    collector_code,
+    organization_code,
+    default_location_payload=None,
+):
     ingested_at = datetime.now(timezone.utc).isoformat()
 
     for doc in documents:
-        enriched_doc = dict(doc)
-        enriched_doc["normalized"] = normalize_document(doc)
+        enriched_doc = add_default_location_if_missing(doc, default_location_payload)
+        enriched_doc["normalized"] = normalize_document(enriched_doc)
         enriched_doc["_ingest"] = {
             "source_filename": final_filename,
             "collector_code": collector_code,
@@ -251,6 +573,8 @@ def enrich_documents(documents, final_filename, collector_code, organization_cod
             "ingested_at": ingested_at,
             "pipeline": "ingest-api",
         }
+        if default_location_payload and not document_has_locations(doc):
+            enriched_doc["_ingest"]["default_gps_applied"] = True
         yield enriched_doc
 
 
@@ -309,6 +633,9 @@ def upload_files():
     try:
         collector_code = validate_collector_code(request.form.get("collector_code"))
         organization_code = validate_organization_code(request.form.get("organization_code"))
+        default_location_payload = parse_default_location_payload(
+            request.form.get("default_location")
+        )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -358,6 +685,7 @@ def upload_files():
                     final_filename=final_filename,
                     collector_code=collector_code,
                     organization_code=organization_code,
+                    default_location_payload=default_location_payload,
                 )
             )
 
@@ -428,6 +756,9 @@ def final_ingest():
     final_filename = (request.form.get("final_filename") or "").strip()
 
     try:
+        default_location_payload = parse_default_location_payload(
+            request.form.get("default_location")
+        )
         raw = uploaded_file.read()
         text = raw.decode("utf-8-sig")
         parsed = json.loads(text)
@@ -439,6 +770,7 @@ def final_ingest():
                 final_filename=final_filename or uploaded_file.filename,
                 collector_code=collector_code,
                 organization_code=organization_code,
+                default_location_payload=default_location_payload,
             )
         )
 
