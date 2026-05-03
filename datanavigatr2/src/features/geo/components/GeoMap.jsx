@@ -76,12 +76,6 @@ async function loadLeafletRuntime() {
     throw new Error("Leaflet failed to load.");
   }
 
-  L.Icon.Default.mergeOptions({
-    iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-    iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-    shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  });
-
   return L;
 }
 
@@ -190,8 +184,9 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
 
     const clusterLayer = L.markerClusterGroup({
       showCoverageOnHover: false,
-      spiderfyOnMaxZoom: true,
-      disableClusteringAtZoom: 18,
+      spiderfyOnMaxZoom: false,
+      zoomToBoundsOnClick: true,
+      disableClusteringAtZoom: 19,
     }).addTo(map);
 
     const trackLayer = L.layerGroup().addTo(map);
@@ -237,6 +232,9 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
     clusterLayerRef.current = clusterLayer;
     trackLayerRef.current = trackLayer;
     drawnLayerRef.current = drawnLayer;
+
+    requestAnimationFrame(() => map.invalidateSize());
+    window.setTimeout(() => map.invalidateSize(), 250);
 
     function selectByPolygon(latLngs, mode = "replace") {
       if (latLngs.length < 3) return;
@@ -338,6 +336,7 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
     const trackLayer = trackLayerRef.current;
     if (!L || !map || !clusterLayer || !trackLayer) return;
 
+    map.invalidateSize();
     clusterLayer.clearLayers();
     trackLayer.clearLayers();
     markersByRowIdRef.current.clear();
@@ -347,14 +346,19 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
       const polyline = L.polyline(track.positions, {
         color: "#2563eb",
         opacity: 0.74,
-        weight: selectedRowIds.has(track.rowId) ? 5 : 3,
+        weight: 3,
       }).addTo(trackLayer);
       tracksByRowIdRef.current.set(track.rowId, polyline);
     });
 
     features.points.forEach((point) => {
       const marker = L.marker([point.lat, point.lng], {
-        title: point.rowId,
+        icon: L.divIcon({
+          className: "geo-point-marker",
+          html: "",
+          iconSize: [14, 14],
+          iconAnchor: [7, 7],
+        }),
       });
 
       marker.on("click", (event) => {
@@ -381,7 +385,6 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
         });
       });
 
-      marker.bindPopup(`<strong>${point.rowId}</strong>`);
       clusterLayer.addLayer(marker);
       markersByRowIdRef.current.set(point.rowId, marker);
     });
@@ -398,7 +401,7 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
         maxZoom: 13,
       });
     }
-  }, [features, queryId, selectedRowIds]);
+  }, [features, queryId]);
 
   useEffect(() => {
     markersByRowIdRef.current.forEach((marker, rowId) => {

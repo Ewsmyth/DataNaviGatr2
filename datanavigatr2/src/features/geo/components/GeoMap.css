@@ -117,12 +117,27 @@
   color: #fff;
 }
 
-.geo-point-selected {
-  filter: hue-rotate(135deg) saturate(1.4);
-}
-
 .geo-track-selected {
   stroke: #f59e0b;
+}
+
+.geo-point-marker {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #16a34a;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.geo-point-marker.geo-point-selected {
+  width: 18px;
+  height: 18px;
+  margin-left: -2px;
+  margin-top: -2px;
+  border-color: #fff7ed;
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.25), 0 2px 8px rgba(0, 0, 0, 0.45);
 }
 
 .leaflet-container {
