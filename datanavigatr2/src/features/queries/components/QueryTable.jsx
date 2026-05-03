@@ -18,6 +18,15 @@ import LayoutDropZone from "./queryTable/LayoutDropZone";
 import { DEFAULT_COLUMNS } from "../data/queryTableColumns";
 import { FILTER_OPERATORS } from "../data/queryFilterOperators";
 import {
+  GEO_SELECTION_MESSAGE,
+  GEO_STATE_MESSAGE,
+  GEO_STATE_REQUEST_MESSAGE,
+  GEO_SYNC_CHANNEL,
+  getRowIdentity,
+  postGeoMessage,
+  writeGeoQueryState,
+} from "../../geo/utils/geoSync";
+import {
   createDefaultFilterState,
   formatCellValue,
   formatDynamicLabel,
@@ -83,10 +92,13 @@ function QueryTable({ query, accessToken, loadingProgress }) {
   const [layoutName, setLayoutName] = useState("");
   const [layoutMessage, setLayoutMessage] = useState("");
   const [isSavingLayout, setIsSavingLayout] = useState(false);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const [selectedGeoRowIds, setSelectedGeoRowIds] = useState(() => new Set());
 
   const filterPopupRef = useRef(null);
   const columnMenuRef = useRef(null);
   const layoutsPopupRef = useRef(null);
+  const viewMenuRef = useRef(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -215,6 +227,13 @@ function QueryTable({ query, accessToken, loadingProgress }) {
       ) {
         setLayoutsOpen(false);
       }
+
+      if (
+        viewMenuRef.current &&
+        !viewMenuRef.current.contains(event.target)
+      ) {
+        setViewMenuOpen(false);
+      }
     }
 
     function handleEscape(event) {
@@ -222,6 +241,7 @@ function QueryTable({ query, accessToken, loadingProgress }) {
         setActiveFilterColumn(null);
         setActiveColumnMenu(null);
         setLayoutsOpen(false);
+        setViewMenuOpen(false);
       }
     }
 
@@ -330,12 +350,19 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     return Array.from(groups.values());
   }, [sortedRows, groupedColumnKeys]);
 
+  const rowIdentityMap = useMemo(() => {
+    return new Map(
+      sortedRows.map((row, index) => [row, getRowIdentity(row, index)])
+    );
+  }, [sortedRows]);
+
   const displayRows = useMemo(() => {
     if (groupedColumnKeys.length === 0) {
       return sortedRows.map((row, index) => ({
         type: "row",
         row,
         key: row?._id ?? `${query.id || "query"}-${index}`,
+        rowId: rowIdentityMap.get(row) || getRowIdentity(row, index),
       }));
     }
 
@@ -347,12 +374,13 @@ function QueryTable({ query, accessToken, loadingProgress }) {
             type: "child",
             row,
             key: `${group.key}-${row?._id ?? index}`,
+            rowId: rowIdentityMap.get(row) || getRowIdentity(row, index),
           });
         });
       }
       return rows;
     });
-  }, [expandedGroupKeys, groupedColumnKeys.length, groupedRows, query.id, sortedRows]);
+  }, [expandedGroupKeys, groupedColumnKeys.length, groupedRows, query.id, rowIdentityMap, sortedRows]);
 
   const displayedResultCount =
     groupedColumnKeys.length > 0 ? groupedRows.length : sortedRows.length;
@@ -360,6 +388,47 @@ function QueryTable({ query, accessToken, loadingProgress }) {
   const activeFilterCount = derivedColumns.filter((column) =>
     hasActiveFilter(column.key)
   ).length;
+
+  useEffect(() => {
+    setSelectedGeoRowIds(new Set());
+  }, [query.id]);
+
+  useEffect(() => {
+    if (!query?.id) return undefined;
+
+    const payload = writeGeoQueryState(query, sortedRows);
+    postGeoMessage({
+      type: GEO_STATE_MESSAGE,
+      queryId: query.id,
+      payload,
+    });
+
+    let channel;
+    try {
+      channel = new BroadcastChannel(GEO_SYNC_CHANNEL);
+      channel.onmessage = (event) => {
+        const message = event.data || {};
+        if (message.queryId !== query.id) return;
+
+        if (message.type === GEO_SELECTION_MESSAGE) {
+          setSelectedGeoRowIds(new Set(message.rowIds || []));
+        }
+
+        if (message.type === GEO_STATE_REQUEST_MESSAGE) {
+          const requestedPayload = writeGeoQueryState(query, sortedRows);
+          channel.postMessage({
+            type: GEO_STATE_MESSAGE,
+            queryId: query.id,
+            payload: requestedPayload,
+          });
+        }
+      };
+    } catch {}
+
+    return () => {
+      channel?.close();
+    };
+  }, [query, sortedRows]);
 
   function handleSort(columnKey) {
     setSortConfigs((current) => {
@@ -628,6 +697,17 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     applyLayoutColumns(layout.columns || []);
   }
 
+  function openGeoNaviGatr() {
+    const payload = writeGeoQueryState(query, sortedRows);
+    postGeoMessage({
+      type: GEO_STATE_MESSAGE,
+      queryId: query.id,
+      payload,
+    });
+    setViewMenuOpen(false);
+    window.open(`/app/geo/${query.id}`, "_blank");
+  }
+
   return (
     <section className="query-table-wrapper">
       <div className="query-table-header">
@@ -764,6 +844,33 @@ function QueryTable({ query, accessToken, loadingProgress }) {
                 </div>
 
                 {layoutMessage && <div className="layout-message">{layoutMessage}</div>}
+              </div>
+            )}
+          </div>
+
+          <div className="query-view-wrap" ref={viewMenuRef}>
+            <button
+              type="button"
+              className={`query-view-button ${viewMenuOpen ? "query-view-button-open" : ""}`}
+              onClick={() => {
+                setViewMenuOpen((current) => !current);
+                setLayoutsOpen(false);
+                setActiveFilterColumn(null);
+                setActiveColumnMenu(null);
+              }}
+            >
+              View
+            </button>
+
+            {viewMenuOpen && (
+              <div className="query-view-menu">
+                <button
+                  type="button"
+                  className="query-view-menu-item"
+                  onClick={openGeoNaviGatr}
+                >
+                  GeoNaviGatr2
+                </button>
               </div>
             )}
           </div>
@@ -915,7 +1022,12 @@ function QueryTable({ query, accessToken, loadingProgress }) {
               return (
                 <tr
                   key={displayRow.key}
-                  className={displayRow.type === "child" ? "query-group-child-row" : ""}
+                  className={[
+                    displayRow.type === "child" ? "query-group-child-row" : "",
+                    selectedGeoRowIds.has(displayRow.rowId) ? "query-row-geo-selected" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                 >
                   {groupedColumnKeys.length > 0 && <td className="group-toggle-cell" />}
                   {visibleColumns.map((column) => (
