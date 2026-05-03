@@ -26,32 +26,87 @@ function getLatLngFromLocation(location) {
   return isValidLatLng(lat, lng) ? { lat, lng } : null;
 }
 
+function getLatLngFromPaths(row, latitudePaths, longitudePaths) {
+  for (const latitudePath of latitudePaths) {
+    const lat = toNumber(getValueByPath(row, latitudePath));
+    if (lat === null) continue;
+
+    for (const longitudePath of longitudePaths) {
+      const lng = toNumber(getValueByPath(row, longitudePath));
+      if (isValidLatLng(lat, lng)) {
+        return { lat, lng };
+      }
+    }
+  }
+
+  return null;
+}
+
+function getLatLngFromCoordinates(coordinates) {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
+
+  const lng = toNumber(coordinates[0]);
+  const lat = toNumber(coordinates[1]);
+
+  return isValidLatLng(lat, lng) ? { lat, lng } : null;
+}
+
 function getPointFromRow(row) {
   const collectionLocation = getLatLngFromLocation(
     getValueByPath(row, "normalized.collection_location")
   );
   if (collectionLocation) return collectionLocation;
 
-  const collectionGeoCoordinates = getValueByPath(
+  const collectionLocationPaths = getLatLngFromPaths(
     row,
-    "normalized.collection_geo.coordinates"
+    [
+      "normalized.collection_location.latitude",
+      "normalized.collection_location.lat",
+      "collection_location.latitude",
+      "collection_location.lat",
+      "latitude",
+      "lat",
+    ],
+    [
+      "normalized.collection_location.longitude",
+      "normalized.collection_location.lng",
+      "normalized.collection_location.lon",
+      "collection_location.longitude",
+      "collection_location.lng",
+      "collection_location.lon",
+      "longitude",
+      "lng",
+      "lon",
+    ]
   );
+  if (collectionLocationPaths) return collectionLocationPaths;
 
-  if (Array.isArray(collectionGeoCoordinates) && collectionGeoCoordinates.length >= 2) {
-    const lng = toNumber(collectionGeoCoordinates[0]);
-    const lat = toNumber(collectionGeoCoordinates[1]);
-    if (isValidLatLng(lat, lng)) return { lat, lng };
+  const coordinatePaths = [
+    "normalized.collection_geo.coordinates",
+    "collection_geo.coordinates",
+    "geo.coordinates",
+    "geometry.coordinates",
+    "coordinates",
+  ];
+
+  for (const coordinatePath of coordinatePaths) {
+    const point = getLatLngFromCoordinates(getValueByPath(row, coordinatePath));
+    if (point) {
+      return point;
+    }
   }
 
   return null;
 }
 
 function getTrackFromRow(row) {
-  const track = getValueByPath(row, "normalized.collection_location_track");
+  const track =
+    getValueByPath(row, "normalized.collection_location_track") ||
+    getValueByPath(row, "collection_location_track");
   if (!Array.isArray(track)) return [];
 
   return track
-    .map((location) => getLatLngFromLocation(location))
+    .map((location) => getLatLngFromLocation(location) || getLatLngFromCoordinates(location))
     .filter(Boolean);
 }
 
