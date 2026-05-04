@@ -95,6 +95,7 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
   const [geoState, setGeoState] = useState(initialState);
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
   const [leafletReady, setLeafletReady] = useState(Boolean(window.L));
+  const [mapReady, setMapReady] = useState(false);
   const [runtimeError, setRuntimeError] = useState("");
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -232,6 +233,7 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
     clusterLayerRef.current = clusterLayer;
     trackLayerRef.current = trackLayer;
     drawnLayerRef.current = drawnLayer;
+    setMapReady(true);
 
     requestAnimationFrame(() => map.invalidateSize());
     window.setTimeout(() => map.invalidateSize(), 250);
@@ -313,6 +315,7 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
     });
 
     return () => {
+      setMapReady(false);
       map.remove();
       mapRef.current = null;
     };
@@ -330,6 +333,8 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
   }, [selectedRowIds]);
 
   useEffect(() => {
+    if (!mapReady) return;
+
     const map = mapRef.current;
     const L = leafletRef.current || window.L;
     const clusterLayer = clusterLayerRef.current;
@@ -401,7 +406,7 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
         maxZoom: 13,
       });
     }
-  }, [features, queryId]);
+  }, [features, mapReady, queryId]);
 
   useEffect(() => {
     markersByRowIdRef.current.forEach((marker, rowId) => {
