@@ -13,6 +13,7 @@ export const DEFAULT_COLUMNS = [
   { key: "normalized.intercept_type", label: "INTERCEPT_TYPE", type: "text" },
   { key: "normalized.mobile_identity_type", label: "MOBILE_IDENTITY_TYPE", type: "text" },
   { key: "normalized.mobile_identity", label: "MOBILE_IDENTITY", type: "text" },
+  { key: "normalized.mobile_country", label: "MOBILE_COUNTRY", type: "text" },
   { key: "normalized.mcc", label: "MCC", type: "text" },
   { key: "normalized.mnc", label: "MNC", type: "text" },
   { key: "normalized.lac", label: "LAC", type: "number" },

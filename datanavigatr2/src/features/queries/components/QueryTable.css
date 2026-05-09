@@ -412,6 +412,13 @@
     color: var(--accent);
 }
 
+.sarneg-message {
+    margin: -2px 0 12px;
+    color: #fca5a5;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
 .query-table-scroll {
     flex: 1;
     min-height: 0;

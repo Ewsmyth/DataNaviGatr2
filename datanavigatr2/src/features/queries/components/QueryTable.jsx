@@ -94,11 +94,15 @@ function QueryTable({ query, accessToken, loadingProgress }) {
   const [isSavingLayout, setIsSavingLayout] = useState(false);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [selectedGeoRowIds, setSelectedGeoRowIds] = useState(() => new Set());
+  const [sarnegColumnKey, setSarnegColumnKey] = useState(null);
+  const [sarnegKey, setSarnegKey] = useState("");
+  const [sarnegMessage, setSarnegMessage] = useState("");
 
   const filterPopupRef = useRef(null);
   const columnMenuRef = useRef(null);
   const layoutsPopupRef = useRef(null);
   const viewMenuRef = useRef(null);
+  const sarnegPopupRef = useRef(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -234,6 +238,13 @@ function QueryTable({ query, accessToken, loadingProgress }) {
       ) {
         setViewMenuOpen(false);
       }
+
+      if (
+        sarnegPopupRef.current &&
+        !sarnegPopupRef.current.contains(event.target)
+      ) {
+        setSarnegColumnKey(null);
+      }
     }
 
     function handleEscape(event) {
@@ -242,6 +253,7 @@ function QueryTable({ query, accessToken, loadingProgress }) {
         setActiveColumnMenu(null);
         setLayoutsOpen(false);
         setViewMenuOpen(false);
+        setSarnegColumnKey(null);
       }
     }
 
@@ -464,6 +476,16 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     setActiveFilterColumn(columnKey);
     setActiveColumnMenu(null);
     setLayoutsOpen(false);
+  }
+
+  function openSarnegModal(columnKey) {
+    setSarnegColumnKey(columnKey);
+    setSarnegKey("");
+    setSarnegMessage("");
+    setActiveColumnMenu(null);
+    setActiveFilterColumn(null);
+    setLayoutsOpen(false);
+    setViewMenuOpen(false);
   }
 
   function toggleGroupColumn(columnKey) {
@@ -706,6 +728,108 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     });
     setViewMenuOpen(false);
     window.open(`/app/geo/${query.id}`, "_blank");
+  }
+
+  function validateSarnegKey(key) {
+    const normalizedKey = key.trim().toUpperCase();
+
+    if (normalizedKey.length !== 10) {
+      return { error: "Enter exactly 10 SARNEG characters." };
+    }
+
+    if (/\s/.test(normalizedKey)) {
+      return { error: "SARNEG characters cannot include spaces." };
+    }
+
+    if (!/^[A-Z]+$/.test(normalizedKey)) {
+      return { error: "Use letters only for the SARNEG characters." };
+    }
+
+    if (new Set(normalizedKey).size !== normalizedKey.length) {
+      return { error: "Each SARNEG character must be unique." };
+    }
+
+    return { normalizedKey };
+  }
+
+  function encodeSarnegValue(value, key) {
+    return String(value)
+      .split("")
+      .map((digit) => key[Number(digit)])
+      .join("");
+  }
+
+  function createSarnegFilename(columnKey) {
+    const columnLabel = columnMap.get(columnKey)?.label || "column";
+    const safeQueryName = String(query.name || "query")
+      .trim()
+      .replace(/[^a-z0-9]+/gi, "_")
+      .replace(/^_+|_+$/g, "")
+      .toLowerCase();
+    const safeColumnName = String(columnLabel)
+      .trim()
+      .replace(/[^a-z0-9]+/gi, "_")
+      .replace(/^_+|_+$/g, "")
+      .toLowerCase();
+
+    return `${safeQueryName || "query"}_${safeColumnName || "column"}_sarneg.txt`;
+  }
+
+  function downloadSarnegColumn() {
+    const validation = validateSarnegKey(sarnegKey);
+    if (validation.error) {
+      setSarnegMessage(validation.error);
+      return;
+    }
+
+    const encodedValues = [];
+    const seenValues = new Set();
+    const invalidValues = [];
+
+    sortedRows.forEach((row) => {
+      const rawValue = formatCellValue(getValueByPath(row, sarnegColumnKey));
+      const numberText = String(rawValue ?? "").trim();
+
+      if (!numberText) {
+        return;
+      }
+
+      if (!/^\d+$/.test(numberText)) {
+        invalidValues.push(numberText);
+        return;
+      }
+
+      const encodedValue = encodeSarnegValue(numberText, validation.normalizedKey);
+      if (!seenValues.has(encodedValue)) {
+        seenValues.add(encodedValue);
+        encodedValues.push(encodedValue);
+      }
+    });
+
+    if (invalidValues.length > 0) {
+      setSarnegMessage(
+        `SARNEG needs numbers only. ${invalidValues.length} value${invalidValues.length === 1 ? "" : "s"} in this column could not be encoded.`
+      );
+      return;
+    }
+
+    if (encodedValues.length === 0) {
+      setSarnegMessage("This column does not have any numeric values to SARNEG.");
+      return;
+    }
+
+    const blob = new Blob([encodedValues.join("\n")], {
+      type: "text/plain;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = createSarnegFilename(sarnegColumnKey);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setSarnegColumnKey(null);
   }
 
   return (
@@ -964,8 +1088,8 @@ function QueryTable({ query, accessToken, loadingProgress }) {
                           </button>
                           <button
                             type="button"
-                            className="column-menu-item column-menu-item-disabled"
-                            disabled
+                            className="column-menu-item"
+                            onClick={() => openSarnegModal(column.key)}
                           >
                             SARNEG
                           </button>
@@ -1132,6 +1256,66 @@ function QueryTable({ query, accessToken, loadingProgress }) {
                 onClick={() => setActiveFilterColumn(null)}
               >
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sarnegColumnKey && (
+        <div className="filter-modal-backdrop" role="presentation">
+          <div
+            className="filter-modal"
+            ref={sarnegPopupRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sarneg-modal-title"
+          >
+            <div className="filter-modal-header">
+              <h3 id="sarneg-modal-title">
+                SARNEG {columnMap.get(sarnegColumnKey)?.label || "column"}
+              </h3>
+              <button
+                type="button"
+                className="filter-modal-close"
+                onClick={() => setSarnegColumnKey(null)}
+                aria-label="Close SARNEG"
+              >
+                ×
+              </button>
+            </div>
+
+            <label className="filter-field">
+              <span>SARNEG characters</span>
+              <input
+                type="text"
+                value={sarnegKey}
+                onChange={(event) => {
+                  setSarnegKey(event.target.value.toUpperCase());
+                  setSarnegMessage("");
+                }}
+                placeholder="10 unique letters"
+                maxLength={10}
+                autoFocus
+              />
+            </label>
+
+            {sarnegMessage && <div className="sarneg-message">{sarnegMessage}</div>}
+
+            <div className="filter-popup-actions">
+              <button
+                type="button"
+                className="filter-action-button"
+                onClick={() => setSarnegColumnKey(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="filter-action-button filter-close-button"
+                onClick={downloadSarnegColumn}
+              >
+                Download TXT
               </button>
             </div>
           </div>
