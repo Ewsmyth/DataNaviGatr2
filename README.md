@@ -142,18 +142,6 @@ Default collection:
 records
 ```
 
-### 🔎 `mongo-express`
-
-Provides a browser UI for MongoDB at:
-
-```text
-http://localhost:8081/
-```
-
-By default Mongo Express binds to localhost only. The default basic auth credentials are controlled by `MONGO_EXPRESS_USERNAME` and `MONGO_EXPRESS_PASSWORD`.
-
----
-
 ### 🐘 `postgres`
 
 Stores system metadata:
@@ -231,17 +219,33 @@ Once you have created the admin username for Portainer and you are logged into t
 
 ### 4a. Copy/Paste Stack Script
 
-Parameters than need to be altered in this yaml file are:
-- `POSTGRES_PASSWORD`
-- `MONGO_INITDB_ROOT_PASSWORD`
-- `DATABASE_URL`
-- `MONGO_URI` x2
-- `SECRET_KEY`
-- `JWT_SECRET_KEY`
-- `DEFAULT_ADMIN_USERNAME`
-- `DEFAULT_ADMIN_EMAIL`
-- `DEFAULT_ADMIN_PASSWORD`
-**NOTE** Do not remove the first tac for the passwords for example if I want to change `POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}` I would change it like so: `POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}`. That is how you would change the passwords for `POSTGRESS_PASSWORD`, `MONGO_INITDB_ROOT_PASSWORD`, and `DEFAULT_ADMIN_PASSWORD`. `MONGO_URI` is located in both `ingest-api` and `datanav-api` so both of those need to be altered. `MONGO_URI` and `DATABASE_URL` need to have the password changed to match the `POSTGRES_PASSWORD`, and `MONGO_INITDB_ROOT_PASSWORD`, nothing else in that needs to change unless you changed the username for those databases. Lastly the `DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_EMAIL`, and `DEFAULT_ADMIN_PASSWORD` set up the login credentials for DataNaviGatr2's default admin. **DO NOT DELETE THAT USER**, if the default admin user is deleted and no other user has administrative privledges the service will have to be completely re-installed. I recommend as soon as the system is deployed login to the admin user create a new user and never touch the admin user again.
+Use Portainer's **Environment variables** section for passwords and secrets instead of editing the same secret in multiple places in the YAML. This matters because `JWT_SECRET_KEY` must be identical in both `datanav-api` and `ingest-api`; if it is missing from `ingest-api`, uploads fail with `Ingest authentication is not configured.`
+
+Recommended Portainer stack environment variables:
+
+```env
+IMAGE_NAMESPACE=ghcr.io/ewsmyth/datanavigatr2
+IMAGE_TAG=latest
+HTTP_PORT=80
+FRONTEND_ORIGIN=http://<server-ip>
+APP_ENV=production
+ALLOW_PUBLIC_REGISTRATION=false
+POSTGRES_PASSWORD=replace-with-a-long-password
+MONGO_ROOT_PASSWORD=replace-with-a-different-long-password
+SECRET_KEY=replace-with-a-long-random-secret
+JWT_SECRET_KEY=replace-with-a-long-random-jwt-secret
+DEFAULT_ADMIN_USERNAME=admin
+DEFAULT_ADMIN_EMAIL=admin@example.local
+DEFAULT_ADMIN_PASSWORD=replace-with-a-long-admin-password
+MAX_UPLOAD_MB=100
+INGEST_BATCH_SIZE=1000
+```
+
+Avoid `$` characters in Portainer stack environment values unless you know how Compose interpolation escaping works. Plain long random strings with letters, numbers, dashes, and underscores are easier and safer.
+
+The stack YAML below references those variables. `POSTGRES_PASSWORD` is used by both Postgres and `DATABASE_URL`; `MONGO_ROOT_PASSWORD` is used by MongoDB and both Mongo connection strings; `JWT_SECRET_KEY` is used by both `datanav-api` and `ingest-api`.
+
+The seeded default admin receives admin privileges. **Do not delete every admin account or remove the admin role from every active admin.** The app now blocks the most obvious admin lockout paths, but you should still create a second admin account after deployment.
 
 Paste this into the Portainer Stack web editor:
 
@@ -254,7 +258,7 @@ services:
     environment:
       POSTGRES_DB: datanav
       POSTGRES_USER: datanav_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U datanav_user -d datanav"]
       interval: 10s
@@ -271,7 +275,7 @@ services:
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-change-me-mongo}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
     healthcheck:
       test:
         [
@@ -291,9 +295,10 @@ services:
     container_name: datanav-ingest-api
     restart: unless-stopped
     environment:
-      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD:-change-me-mongo}@mongodb:27017/ingestion_db?authSource=admin
+      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD}@mongodb:27017/ingestion_db?authSource=admin
       MONGO_DB_NAME: ingestion_db
       MONGO_COLLECTION_NAME: records
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       CORS_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost}
       UPLOAD_TMP_DIR: /tmp/ingest_uploads
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
@@ -309,18 +314,20 @@ services:
     container_name: datanav-api
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+psycopg://datanav_user:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/datanav
-      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD:-change-me-mongo}@mongodb:27017/ingestion_db?authSource=admin
+      DATABASE_URL: postgresql+psycopg://datanav_user:${POSTGRES_PASSWORD}@postgres:5432/datanav
+      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD}@mongodb:27017/ingestion_db?authSource=admin
       MONGO_DB_NAME: ingestion_db
-      SECRET_KEY: ${SECRET_KEY:-change-me-secret}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt}
+      APP_ENV: ${APP_ENV:-production}
+      ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       ACCESS_TOKEN_EXPIRES_MINUTES: ${ACCESS_TOKEN_EXPIRES_MINUTES:-15}
       REFRESH_TOKEN_EXPIRES_DAYS: ${REFRESH_TOKEN_EXPIRES_DAYS:-7}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       COOKIE_SAMESITE: ${COOKIE_SAMESITE:-Lax}
       DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME:-admin}
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@local}
-      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-ChangeMe123!}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD}
       CORS_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost}
     depends_on:
       postgres:
@@ -399,6 +406,19 @@ networks:
     driver: bridge
 ```
 
+After updating the stack, verify the shared JWT secret is present in both API containers:
+
+```bash
+sudo docker exec datanav-api printenv JWT_SECRET_KEY
+sudo docker exec datanav-ingest-api printenv JWT_SECRET_KEY
+```
+
+Both commands should print the same non-empty value. If `datanav-ingest-api` prints nothing, admin ingest uploads will fail with:
+
+```text
+Ingest authentication is not configured.
+```
+
 ### 5. Using the System
 
 After deploying you can open the main screen by going to your loop back or the ip of wheatever system is hosting the service:
@@ -407,7 +427,7 @@ After deploying you can open the main screen by going to your loop back or the i
 http://localhost/
 ```
 
-The Mongo Express button opens the Mongo Express database UI, the Portainer button takes you to your local Portainer server, and DataView opens an admin-only database metrics dashboard.
+The Portainer button takes you to your local Portainer server, and DataView opens an admin-only database metrics dashboard.
 - **Inget:** This admin-only menu is where you will import your `json` files so they get filtered and sent to the queryable database. Your options in this window are:
   - Files: add one or multiple json files not exceeding 50MB
   - Collector Code: 2 character code identify the collector
@@ -438,17 +458,11 @@ The Mongo Express button opens the Mongo Express database UI, the Portainer butt
 |---|---:|---|
 | `POSTGRES_PASSWORD` | `change-me-postgres` | Password for the PostgreSQL `datanav_user` account |
 | `MONGO_ROOT_PASSWORD` | `change-me-mongo` | MongoDB root password |
-| `MONGO_EXPRESS_USERNAME` | `admin` | Mongo Express basic auth username |
-| `MONGO_EXPRESS_PASSWORD` | `change-me-mongo-express` | Mongo Express basic auth password |
-| `MONGO_EXPRESS_BIND_ADDRESS` | `127.0.0.1` | Host interface used for Mongo Express |
-
 Recommended:
 
 ```env
 POSTGRES_PASSWORD=use-a-long-random-password
 MONGO_ROOT_PASSWORD=use-a-different-long-random-password
-MONGO_EXPRESS_USERNAME=admin
-MONGO_EXPRESS_PASSWORD=use-another-long-random-password
 ```
 
 ---
@@ -550,11 +564,10 @@ Internally, the containers talk on the Docker network:
 | `ingest-api` | `5000` |
 | `datanav-api` | `5001` |
 | `datanavigatr2` | `5002` |
-| `mongo-express` | `8081` |
 | `postgres` | `5432` |
 | `mongodb` | `27017` |
 
-The gateway publishes the main browser-facing port. Mongo Express also publishes `MONGO_EXPRESS_PORT`, which defaults to `8081`, on `MONGO_EXPRESS_BIND_ADDRESS`, which defaults to `127.0.0.1`.
+The gateway publishes the main browser-facing port.
 
 ---
 

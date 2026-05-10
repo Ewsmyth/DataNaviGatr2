@@ -38,25 +38,6 @@ services:
     networks:
       - datanavigatr_net
 
-  mongo-express:
-    image: mongo-express:1.0.2-20
-    container_name: datanav-mongo-express
-    restart: unless-stopped
-    environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
-      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_ROOT_PASSWORD:-change-me-mongo}
-      ME_CONFIG_MONGODB_SERVER: mongodb
-      ME_CONFIG_MONGODB_URL: mongodb://admin:${MONGO_ROOT_PASSWORD:-change-me-mongo}@mongodb:27017/?authSource=admin
-      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:-admin}
-      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-change-me-mongo-express}
-    ports:
-      - "${MONGO_EXPRESS_BIND_ADDRESS:-127.0.0.1}:${MONGO_EXPRESS_PORT:-8081}:8081"
-    depends_on:
-      mongodb:
-        condition: service_healthy
-    networks:
-      - datanavigatr_net
-
   ingest-api:
     image: ${IMAGE_NAMESPACE:-ghcr.io/your-github-username/datanavigatr2}/ingest-api:${IMAGE_TAG:-latest}
     container_name: datanav-ingest-api

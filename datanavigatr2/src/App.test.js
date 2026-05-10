@@ -13,8 +13,5 @@ test('renders landing navigation', () => {
   expect(screen.getByText(/Ingest/i)).toBeInTheDocument();
   expect(screen.getByText(/DataView/i)).toBeInTheDocument();
   expect(screen.getByText(/Portainer/i)).toBeInTheDocument();
-  expect(screen.getByText(/Mongo Express/i)).toHaveAttribute(
-    'href',
-    'http://localhost:8081'
-  );
+  expect(screen.queryByText(/Mongo Express/i)).not.toBeInTheDocument();
 });

@@ -5,10 +5,6 @@ function LandingPage() {
   const currentHostname = window.location.hostname || "localhost";
   const portainerUrl =
     process.env.REACT_APP_PORTAINER_URL || `https://${currentHostname}:9443`;
-  const mongoExpressPort = process.env.REACT_APP_MONGO_EXPRESS_PORT || "8081";
-  const mongoExpressUrl =
-    process.env.REACT_APP_MONGO_EXPRESS_URL ||
-    `http://${currentHostname}:${mongoExpressPort}`;
 
   return (
     <main className="landing-page">
@@ -53,14 +49,6 @@ function LandingPage() {
             Portainer
           </a>
 
-          <a
-            className="landing-button landing-button-link"
-            href={mongoExpressUrl}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Mongo Express
-          </a>
         </div>
       </div>
     </main>
