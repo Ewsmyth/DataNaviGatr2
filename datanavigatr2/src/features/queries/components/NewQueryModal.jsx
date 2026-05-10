@@ -7,9 +7,15 @@ import { buildInitialValues } from "../utils/queryForm";
 
 const DEFAULT_CUSTOM_OPERATOR = "contains";
 const CUSTOM_OPERATOR_OPTIONS = FILTER_OPERATORS;
+const CUSTOM_QUERY_COLUMNS = [
+  ...DEFAULT_COLUMNS,
+  { key: "normalized.mobile_country", label: "MOBILE_COUNTRY", type: "text" },
+].filter((column, index, columns) =>
+  columns.findIndex((item) => item.key === column.key) === index
+);
 
 function createCondition() {
-  const column = DEFAULT_COLUMNS[0] || { key: "", label: "", type: "text" };
+  const column = CUSTOM_QUERY_COLUMNS[0] || { key: "", label: "", type: "text" };
 
   return {
     type: "condition",
@@ -158,7 +164,7 @@ function CustomQueryGroup({ group, path = [], depth = 0, onChange }) {
                 <select
                   value={rule.column || ""}
                   onChange={(event) => {
-                    const selectedColumn = DEFAULT_COLUMNS.find(
+                    const selectedColumn = CUSTOM_QUERY_COLUMNS.find(
                       (column) => column.key === event.target.value
                     );
                     updateChild(childPath, (currentRule) => ({
@@ -168,7 +174,7 @@ function CustomQueryGroup({ group, path = [], depth = 0, onChange }) {
                     }));
                   }}
                 >
-                  {DEFAULT_COLUMNS.map((column) => (
+                  {CUSTOM_QUERY_COLUMNS.map((column) => (
                     <option key={column.key} value={column.key}>
                       {column.label}
                     </option>

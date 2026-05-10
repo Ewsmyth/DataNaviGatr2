@@ -540,12 +540,6 @@
     color: var(--accent);
 }
 
-.column-menu-item-disabled {
-    color: var(--muted);
-    cursor: not-allowed;
-    opacity: 0.55;
-}
-
 .filter-modal-backdrop {
     position: fixed;
     inset: 0;
