@@ -30,6 +30,8 @@ services:
       DATABASE_URL: postgresql+psycopg://datanav_user:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/datanav
       MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD:-change-me-mongo}@mongodb:27017/ingestion_db?authSource=admin
       MONGO_DB_NAME: ingestion_db
+      APP_ENV: ${APP_ENV:-development}
+      ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
       SECRET_KEY: ${SECRET_KEY:-change-me-secret}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt}
       DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME:-admin}

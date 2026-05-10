@@ -38,6 +38,25 @@ services:
     networks:
       - datanavigatr_net
 
+  mongo-express:
+    image: mongo-express:1.0.2-20
+    container_name: datanav-mongo-express
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_ROOT_PASSWORD:-change-me-mongo}
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_URL: mongodb://admin:${MONGO_ROOT_PASSWORD:-change-me-mongo}@mongodb:27017/?authSource=admin
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:-admin}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-change-me-mongo-express}
+    ports:
+      - "${MONGO_EXPRESS_BIND_ADDRESS:-127.0.0.1}:${MONGO_EXPRESS_PORT:-8081}:8081"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - datanavigatr_net
+
   ingest-api:
     image: ${IMAGE_NAMESPACE:-ghcr.io/your-github-username/datanavigatr2}/ingest-api:${IMAGE_TAG:-latest}
     container_name: datanav-ingest-api
@@ -46,6 +65,7 @@ services:
       MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD:-change-me-mongo}@mongodb:27017/ingestion_db?authSource=admin
       MONGO_DB_NAME: ingestion_db
       MONGO_COLLECTION_NAME: records
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt}
       CORS_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost}
       UPLOAD_TMP_DIR: /tmp/ingest_uploads
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-100}
@@ -64,6 +84,8 @@ services:
       DATABASE_URL: postgresql+psycopg://datanav_user:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/datanav
       MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD:-change-me-mongo}@mongodb:27017/ingestion_db?authSource=admin
       MONGO_DB_NAME: ingestion_db
+      APP_ENV: ${APP_ENV:-development}
+      ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
       SECRET_KEY: ${SECRET_KEY:-change-me-secret}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt}
       ACCESS_TOKEN_EXPIRES_MINUTES: ${ACCESS_TOKEN_EXPIRES_MINUTES:-15}

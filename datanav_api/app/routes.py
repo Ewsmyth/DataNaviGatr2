@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from collections import Counter
 
 from flask import Blueprint, current_app, g, jsonify, request
 
@@ -81,6 +82,30 @@ def require_role(role_name):
     return decorator
 
 
+def _active_admin_count(exclude_user_id=None):
+    admins = (
+        User.query
+        .join(User.roles)
+        .filter(Role.name == "admin", User.is_active.is_(True))
+        .all()
+    )
+    return sum(1 for user in admins if user.id != exclude_user_id)
+
+
+def _would_remove_last_active_admin(user, next_is_active=None, next_roles=None):
+    if not user.has_role("admin"):
+        return False
+
+    is_active = user.is_active if next_is_active is None else bool(next_is_active)
+    role_names = set(user.role_names() if next_roles is None else next_roles)
+    remains_active_admin = is_active and "admin" in role_names
+
+    if remains_active_admin:
+        return False
+
+    return _active_admin_count(exclude_user_id=user.id) == 0
+
+
 @api_bp.route("/api/health", methods=["GET"])
 def health():
     from .mongo import ping_mongo
@@ -112,6 +137,9 @@ def health():
 
 @api_bp.route("/api/auth/register", methods=["POST"])
 def register():
+    if not current_app.config.get("ALLOW_PUBLIC_REGISTRATION", False):
+        return jsonify({"error": "Public registration is disabled."}), 403
+
     payload = request.get_json() or {}
     username = (payload.get("username") or "").strip()
     email = (payload.get("email") or "").strip().lower()
@@ -173,6 +201,7 @@ def login():
         user_id=user.id,
         secret=current_app.config["JWT_SECRET_KEY"],
         expires_minutes=current_app.config["ACCESS_TOKEN_EXPIRES_MINUTES"],
+        roles=user.role_names(),
     )
 
     refresh_token = create_refresh_token(
@@ -222,6 +251,7 @@ def refresh():
         user_id=user.id,
         secret=current_app.config["JWT_SECRET_KEY"],
         expires_minutes=current_app.config["ACCESS_TOKEN_EXPIRES_MINUTES"],
+        roles=user.role_names(),
     )
 
     return jsonify({
@@ -676,6 +706,9 @@ def admin_update_user(user_id):
     if not user:
         return jsonify({"error": "User not found."}), 404
 
+    if is_active is not None and _would_remove_last_active_admin(user, next_is_active=is_active):
+        return jsonify({"error": "At least one active admin account is required."}), 400
+
     if is_active is not None:
         user.is_active = bool(is_active)
 
@@ -694,6 +727,12 @@ def admin_delete_user(user_id):
     user = User.query.filter_by(id=user_id).first()
     if not user:
         return jsonify({"error": "User not found."}), 404
+
+    if user.id == g.current_user.id:
+        return jsonify({"error": "Admins cannot delete their own account."}), 400
+
+    if _would_remove_last_active_admin(user, next_is_active=False):
+        return jsonify({"error": "At least one active admin account is required."}), 400
 
     db.session.delete(user)
     db.session.commit()
@@ -715,6 +754,9 @@ def admin_update_roles(user_id):
     roles = Role.query.filter(Role.name.in_(role_names)).all()
     if len(roles) != len(set(role_names)):
         return jsonify({"error": "One or more roles are invalid."}), 400
+
+    if _would_remove_last_active_admin(user, next_roles=role_names):
+        return jsonify({"error": "At least one active admin account is required."}), 400
 
     user.roles = roles
     db.session.commit()
@@ -758,9 +800,93 @@ def update_query_run_review(run_id):
     }), 200
 
 
+def _parse_record_day(raw_value):
+    if not raw_value:
+        return "Unknown"
+
+    value = raw_value
+    if isinstance(value, dict):
+        value = value.get("$date") or value.get("date")
+
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+
+    text = str(value).strip()
+    if not text:
+        return "Unknown"
+
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed.date().isoformat()
+    except ValueError:
+        return text[:10] if len(text) >= 10 else "Unknown"
+
+
+def _first_present(*values):
+    for value in values:
+        if value not in [None, ""]:
+            return value
+    return "Unknown"
+
+
+@api_bp.route("/api/dataview/metrics", methods=["GET"])
+@token_required
+@require_role("admin")
+def dataview_metrics():
+    from .mongo import get_mongo_db
+
+    db_mongo = get_mongo_db()
+    collection = db_mongo["records"]
+
+    total_records = collection.estimated_document_count()
+    time_buckets = Counter()
+    org_counts = Counter()
+    collector_counts = Counter()
+    signal_counts = Counter()
+
+    cursor = collection.find(
+        {},
+        {
+            "_id": 0,
+            "start_time": 1,
+            "normalized.start_time": 1,
+            "signal_type": 1,
+            "normalized.signal_type": 1,
+            "_ingest.organization_code": 1,
+            "_ingest.collector_code": 1,
+        },
+    )
+
+    for record in cursor:
+        normalized = record.get("normalized") if isinstance(record.get("normalized"), dict) else {}
+        ingest = record.get("_ingest") if isinstance(record.get("_ingest"), dict) else {}
+
+        time_buckets[_parse_record_day(_first_present(normalized.get("start_time"), record.get("start_time")))] += 1
+        org_counts[str(_first_present(ingest.get("organization_code")))] += 1
+        collector_counts[str(_first_present(ingest.get("collector_code")))] += 1
+        signal_counts[str(_first_present(normalized.get("signal_type"), record.get("signal_type")))] += 1
+
+    def counter_items(counter):
+        return [
+            {"label": label, "count": count}
+            for label, count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+        ]
+
+    return jsonify({
+        "totalRecords": total_records,
+        "recordsOverTime": [
+            {"date": label, "count": count}
+            for label, count in sorted(time_buckets.items())
+        ],
+        "recordsByOrgCode": counter_items(org_counts),
+        "recordsByCollectorCode": counter_items(collector_counts),
+        "recordsBySignalType": counter_items(signal_counts),
+    }), 200
+
+
 @api_bp.route("/api/data/query", methods=["POST"])
 @token_required
-@require_role("user")
+@require_role("admin")
 def run_mongo_query():
     from .mongo import get_mongo_db
 
@@ -768,7 +894,10 @@ def run_mongo_query():
     collection_name = (payload.get("collection") or "").strip()
     mongo_filter = payload.get("filter") or {}
     projection = payload.get("projection")
-    limit = int(payload.get("limit", 100))
+    try:
+        limit = int(payload.get("limit", 100))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Limit must be a whole number."}), 400
 
     if not collection_name:
         return jsonify({"error": "Collection is required."}), 400

@@ -5,6 +5,10 @@ function LandingPage() {
   const currentHostname = window.location.hostname || "localhost";
   const portainerUrl =
     process.env.REACT_APP_PORTAINER_URL || `https://${currentHostname}:9443`;
+  const mongoExpressPort = process.env.REACT_APP_MONGO_EXPRESS_PORT || "8081";
+  const mongoExpressUrl =
+    process.env.REACT_APP_MONGO_EXPRESS_URL ||
+    `http://${currentHostname}:${mongoExpressPort}`;
 
   return (
     <main className="landing-page">
@@ -31,6 +35,15 @@ function LandingPage() {
             Ingest
           </Link>
 
+          <Link
+            to="/dataview"
+            target="_blank"
+            rel="noreferrer"
+            className="landing-button"
+          >
+            DataView
+          </Link>
+
           <a
             className="landing-button landing-button-link"
             href={portainerUrl}
@@ -42,7 +55,7 @@ function LandingPage() {
 
           <a
             className="landing-button landing-button-link"
-            href={process.env.REACT_APP_MONGO_EXPRESS_URL || "http://localhost:8081"}
+            href={mongoExpressUrl}
             target="_blank"
             rel="noreferrer"
           >

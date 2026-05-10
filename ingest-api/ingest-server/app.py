@@ -3,9 +3,11 @@ import math
 import os
 import re
 import hashlib
+from functools import wraps
 from datetime import datetime, timezone
 from pathlib import Path
 
+import jwt
 from flask_cors import CORS
 from flask import Flask, jsonify, request
 from pymongo import MongoClient
@@ -19,6 +21,7 @@ UPLOAD_TMP_DIR = os.getenv("UPLOAD_TMP_DIR", "/tmp/ingest_uploads")
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin:password@mongodb:27017/?authSource=admin")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "ingestion_db")
 MONGO_COLLECTION_NAME = os.getenv("MONGO_COLLECTION_NAME", "records")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "120"))
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "100"))
 BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "1000"))
@@ -30,6 +33,39 @@ os.makedirs(UPLOAD_TMP_DIR, exist_ok=True)
 mongo_client = MongoClient(MONGO_URI)
 mongo_db = mongo_client[MONGO_DB_NAME]
 mongo_collection = mongo_db[MONGO_COLLECTION_NAME]
+
+
+def _get_bearer_token():
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    return auth_header.split(" ", 1)[1].strip()
+
+
+def admin_token_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not JWT_SECRET_KEY:
+            return jsonify({"error": "Ingest authentication is not configured."}), 503
+
+        token = _get_bearer_token()
+        if not token:
+            return jsonify({"error": "Admin authentication required."}), 401
+
+        try:
+            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=["HS256"])
+        except Exception:
+            return jsonify({"error": "Invalid or expired token."}), 401
+
+        if payload.get("type") != "access":
+            return jsonify({"error": "Invalid token type."}), 401
+
+        if "admin" not in (payload.get("roles") or []):
+            return jsonify({"error": "Admin role required."}), 403
+
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def allowed_file(filename: str) -> bool:
@@ -492,6 +528,7 @@ def normalize_gsm_document(doc):
         "message_type": body.get("message_type"),
         "mobile_identity": body.get("mobile_identity"),
         "mobile_identity_type": body.get("mobile_identity_type"),
+        "mobile_country": body.get("mobile_country"),
         "mcc": body.get("MCC"),
         "mnc": body.get("MNC"),
         "lac": body.get("LAC"),
@@ -629,6 +666,7 @@ def health():
 
 @app.post("/api/upload")
 @app.post("/api/ingest/upload")
+@admin_token_required
 def upload_files():
     try:
         collector_code = validate_collector_code(request.form.get("collector_code"))
@@ -743,6 +781,7 @@ def upload_files():
 
 
 @app.post("/api/ingest/final")
+@admin_token_required
 def final_ingest():
     if "file" not in request.files:
         return jsonify({"error": "No file field named 'file' found in request."}), 400

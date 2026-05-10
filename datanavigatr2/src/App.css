@@ -62,12 +62,17 @@ body {
 }
 
 .landing-page,
-.ingest-page {
+.ingest-page,
+.dataview-page {
   min-height: 100vh;
+  padding: 32px;
+}
+
+.landing-page,
+.ingest-page {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 32px;
 }
 
 .landing-content,
@@ -276,12 +281,181 @@ body {
   cursor: pointer;
 }
 
+.ingest-message {
+  margin-top: 16px;
+  color: var(--muted);
+}
+
+.dataview-page {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+}
+
+.dataview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.dataview-header h1 {
+  margin: 0 0 8px 0;
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+.dataview-header p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.dataview-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dataview-login-panel,
+.dataview-panel,
+.dataview-stat {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  box-shadow: var(--shadow);
+}
+
+.dataview-login-panel {
+  width: min(520px, 100%);
+  padding: 24px;
+}
+
+.dataview-summary-grid,
+.dataview-breakdown-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.dataview-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.dataview-breakdown-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.dataview-stat,
+.dataview-panel {
+  padding: 18px;
+}
+
+.dataview-stat span,
+.dataview-panel-heading span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.dataview-stat strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 2rem;
+}
+
+.dataview-panel h2,
+.dataview-panel-heading h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.dataview-panel-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.dataview-chart-wrap {
+  overflow-x: auto;
+}
+
+.dataview-chart {
+  display: block;
+  width: 100%;
+  min-width: 640px;
+  height: auto;
+}
+
+.dataview-axis {
+  stroke: var(--border);
+  stroke-width: 2;
+}
+
+.dataview-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dataview-point {
+  fill: var(--accent-2);
+  stroke: var(--text);
+  stroke-width: 1.5;
+}
+
+.dataview-chart-labels,
+.dataview-list-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dataview-chart-labels {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.dataview-list {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dataview-list-row {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+
+.dataview-list-row span,
+.dataview-empty {
+  color: var(--muted);
+}
+
 @media (max-width: 700px) {
   .landing-button-grid {
     grid-template-columns: 1fr;
   }
 
   .ingest-gps-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dataview-header,
+  .dataview-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dataview-summary-grid,
+  .dataview-breakdown-grid {
     grid-template-columns: 1fr;
   }
 }

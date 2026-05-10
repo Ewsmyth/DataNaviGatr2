@@ -11,6 +11,10 @@ test('renders landing navigation', () => {
 
   expect(screen.getByRole('heading', { name: /DataNaviGatr2/i })).toBeInTheDocument();
   expect(screen.getByText(/Ingest/i)).toBeInTheDocument();
+  expect(screen.getByText(/DataView/i)).toBeInTheDocument();
   expect(screen.getByText(/Portainer/i)).toBeInTheDocument();
-  expect(screen.getByText(/Mongo Express/i)).toBeInTheDocument();
+  expect(screen.getByText(/Mongo Express/i)).toHaveAttribute(
+    'href',
+    'http://localhost:8081'
+  );
 });

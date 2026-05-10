@@ -20,7 +20,7 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def _build_token(user_id: str, token_type: str, secret: str, expires_delta: timedelta) -> str:
+def _build_token(user_id: str, token_type: str, secret: str, expires_delta: timedelta, roles=None) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
@@ -28,15 +28,18 @@ def _build_token(user_id: str, token_type: str, secret: str, expires_delta: time
         "iat": int(now.timestamp()),
         "exp": int((now + expires_delta).timestamp()),
     }
+    if roles is not None:
+        payload["roles"] = sorted(set(roles))
     return jwt.encode(payload, secret, algorithm="HS256")
 
 
-def create_access_token(user_id: str, secret: str, expires_minutes: int = 15) -> str:
+def create_access_token(user_id: str, secret: str, expires_minutes: int = 15, roles=None) -> str:
     return _build_token(
         user_id=user_id,
         token_type="access",
         secret=secret,
         expires_delta=timedelta(minutes=expires_minutes),
+        roles=roles,
     )
 
 

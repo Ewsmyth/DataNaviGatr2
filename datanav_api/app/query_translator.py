@@ -263,6 +263,22 @@ def normalize_mongo_document(doc: dict):
                 continue
             normalized[key] = _merge_value(normalized.get(key), value)
 
+    normalized_fields = (
+        normalized["normalized"].copy()
+        if isinstance(normalized.get("normalized"), dict)
+        else {}
+    )
+    if normalized_fields or normalized.get("mobile_country") not in [None, ""]:
+        for raw_key, normalized_key in [
+            ("mobile_country", "mobile_country"),
+        ]:
+            if (
+                normalized_fields.get(normalized_key) in [None, ""]
+                and normalized.get(raw_key) not in [None, ""]
+            ):
+                normalized_fields[normalized_key] = normalized[raw_key]
+        normalized["normalized"] = normalized_fields
+
     if "frequency" in normalized and "center_frequency" not in normalized:
         normalized["center_frequency"] = normalized["frequency"]
     elif "center_frequency" in normalized and "frequency" not in normalized:

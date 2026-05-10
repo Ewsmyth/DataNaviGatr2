@@ -1,7 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 const INGEST_BASE_URL =
   process.env.REACT_APP_INGEST_BASE_URL ?? "";
+const API_BASE_URL =
+  process.env.REACT_APP_API_BASE_URL ?? "";
 
 const DEFAULT_GPS_TYPES = {
   decimal_degrees: {
@@ -40,6 +42,11 @@ const DEFAULT_GPS_TYPES = {
 };
 
 function IngestPage() {
+  const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem("accessToken") || "");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loginForm, setLoginForm] = useState({ identifier: "", password: "" });
+  const [authMessage, setAuthMessage] = useState("");
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
   const [isIngestUploading, setIsIngestUploading] = useState(false);
   const [message, setMessage] = useState("");
   const [collectorCode, setCollectorCode] = useState("");
@@ -47,6 +54,79 @@ function IngestPage() {
   const [useDefaultGps, setUseDefaultGps] = useState(false);
   const [defaultGpsType, setDefaultGpsType] = useState("decimal_degrees");
   const [defaultGpsValues, setDefaultGpsValues] = useState({});
+  const isAdmin = currentUser?.roles?.includes("admin");
+
+  useEffect(() => {
+    if (accessToken) {
+      sessionStorage.setItem("accessToken", accessToken);
+    } else {
+      sessionStorage.removeItem("accessToken");
+    }
+  }, [accessToken]);
+
+  useEffect(() => {
+    async function loadCurrentUser() {
+      if (!accessToken) {
+        setCurrentUser(null);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load current user.");
+        }
+        setCurrentUser(data.user || null);
+      } catch {
+        setAccessToken("");
+        setCurrentUser(null);
+      }
+    }
+
+    loadCurrentUser();
+  }, [accessToken]);
+
+  async function handleAdminLogin(event) {
+    event.preventDefault();
+    setIsAuthLoading(true);
+    setAuthMessage("");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(loginForm),
+        credentials: "include",
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Login failed.");
+      }
+      if (!data.user?.roles?.includes("admin")) {
+        throw new Error("Admin role required for ingest.");
+      }
+      setAccessToken(data.access_token || "");
+      setCurrentUser(data.user || null);
+      setLoginForm({ identifier: "", password: "" });
+    } catch (error) {
+      setAuthMessage(error.message || "Login failed.");
+    } finally {
+      setIsAuthLoading(false);
+    }
+  }
+
+  function handleLogout() {
+    setAccessToken("");
+    setCurrentUser(null);
+    setAuthMessage("");
+  }
 
   function updateDefaultGpsValue(name, value) {
     setDefaultGpsValues((currentValues) => ({
@@ -95,6 +175,9 @@ function IngestPage() {
     try {
       const response = await fetch(`${INGEST_BASE_URL}/api/ingest/upload`, {
         method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: formData,
       });
 
@@ -121,6 +204,55 @@ function IngestPage() {
             <p>Upload one or more JSON files to the standalone ingest service.</p>
           </div>
 
+          {!isAdmin ? (
+            <form className="ingest-upload-form" onSubmit={handleAdminLogin}>
+              <label className="ingest-file-field">
+                <span>Admin Username or Email</span>
+                <input
+                  type="text"
+                  value={loginForm.identifier}
+                  autoComplete="username"
+                  onChange={(event) =>
+                    setLoginForm((current) => ({
+                      ...current,
+                      identifier: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+
+              <label className="ingest-file-field">
+                <span>Admin Password</span>
+                <input
+                  type="password"
+                  value={loginForm.password}
+                  autoComplete="current-password"
+                  onChange={(event) =>
+                    setLoginForm((current) => ({
+                      ...current,
+                      password: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+
+              <div className="ingest-page-actions">
+                <a href="/" className="ingest-secondary-button">
+                  Open Menu
+                </a>
+                <button
+                  type="submit"
+                  className="ingest-primary-button"
+                  disabled={isAuthLoading}
+                >
+                  {isAuthLoading ? "Logging in..." : "Admin Login"}
+                </button>
+              </div>
+
+              {authMessage && <div className="ingest-message">{authMessage}</div>}
+            </form>
+          ) : (
+          <>
           <form
             className="ingest-upload-form"
             onSubmit={(event) => {
@@ -244,6 +376,13 @@ function IngestPage() {
               <a href="/" className="ingest-secondary-button">
                 Open Menu
               </a>
+              <button
+                type="button"
+                className="ingest-secondary-button"
+                onClick={handleLogout}
+              >
+                Logout
+              </button>
 
               <button
                 type="submit"
@@ -256,6 +395,8 @@ function IngestPage() {
           </form>
 
           {message && <div className="ingest-message">{message}</div>}
+          </>
+          )}
         </div>
       </main>
     </div>

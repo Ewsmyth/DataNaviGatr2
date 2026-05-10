@@ -142,6 +142,16 @@ Default collection:
 records
 ```
 
+### 🔎 `mongo-express`
+
+Provides a browser UI for MongoDB at:
+
+```text
+http://localhost:8081/
+```
+
+By default Mongo Express binds to localhost only. The default basic auth credentials are controlled by `MONGO_EXPRESS_USERNAME` and `MONGO_EXPRESS_PASSWORD`.
+
 ---
 
 ### 🐘 `postgres`
@@ -397,8 +407,8 @@ After deploying you can open the main screen by going to your loop back or the i
 http://localhost/
 ```
 
-The Mongo Express button does nothing at the time, the Portainer button takes you to your local Portainer server.
-- **Inget:** This menu is where you will import your `json` files so they get filtered and sent to the queryable database. Your options in this window are:
+The Mongo Express button opens the Mongo Express database UI, the Portainer button takes you to your local Portainer server, and DataView opens an admin-only database metrics dashboard.
+- **Inget:** This admin-only menu is where you will import your `json` files so they get filtered and sent to the queryable database. Your options in this window are:
   - Files: add one or multiple json files not exceeding 50MB
   - Collector Code: 2 character code identify the collector
   - Organization Code: 5 character code identifying your organization
@@ -428,12 +438,17 @@ The Mongo Express button does nothing at the time, the Portainer button takes yo
 |---|---:|---|
 | `POSTGRES_PASSWORD` | `change-me-postgres` | Password for the PostgreSQL `datanav_user` account |
 | `MONGO_ROOT_PASSWORD` | `change-me-mongo` | MongoDB root password |
+| `MONGO_EXPRESS_USERNAME` | `admin` | Mongo Express basic auth username |
+| `MONGO_EXPRESS_PASSWORD` | `change-me-mongo-express` | Mongo Express basic auth password |
+| `MONGO_EXPRESS_BIND_ADDRESS` | `127.0.0.1` | Host interface used for Mongo Express |
 
 Recommended:
 
 ```env
 POSTGRES_PASSWORD=use-a-long-random-password
 MONGO_ROOT_PASSWORD=use-a-different-long-random-password
+MONGO_EXPRESS_USERNAME=admin
+MONGO_EXPRESS_PASSWORD=use-another-long-random-password
 ```
 
 ---
@@ -464,6 +479,8 @@ DEFAULT_ADMIN_PASSWORD=replace-this-before-real-use
 |---|---:|---|
 | `SECRET_KEY` | `change-me-secret` | Flask app secret |
 | `JWT_SECRET_KEY` | `change-me-jwt` | JWT signing secret |
+| `APP_ENV` | `development` | Set to `production` to reject missing/unsafe required secrets |
+| `ALLOW_PUBLIC_REGISTRATION` | `false` | Set to `true` only when public self-registration is intended |
 | `ACCESS_TOKEN_EXPIRES_MINUTES` | `15` | Access token lifetime |
 | `REFRESH_TOKEN_EXPIRES_DAYS` | `7` | Refresh token lifetime |
 | `COOKIE_SECURE` | `false` | Set to `true` when serving over HTTPS |
@@ -523,7 +540,7 @@ Through the gateway:
 ```text
 GET  http://<server-ip>/api/health
 GET  http://<server-ip>/api/ingest/health
-POST http://<server-ip>/api/ingest/upload
+POST http://<server-ip>/api/ingest/upload  # admin bearer token required
 ```
 
 Internally, the containers talk on the Docker network:
@@ -533,10 +550,11 @@ Internally, the containers talk on the Docker network:
 | `ingest-api` | `5000` |
 | `datanav-api` | `5001` |
 | `datanavigatr2` | `5002` |
+| `mongo-express` | `8081` |
 | `postgres` | `5432` |
 | `mongodb` | `27017` |
 
-Only the gateway publishes a browser-facing port by default.
+The gateway publishes the main browser-facing port. Mongo Express also publishes `MONGO_EXPRESS_PORT`, which defaults to `8081`, on `MONGO_EXPRESS_BIND_ADDRESS`, which defaults to `127.0.0.1`.
 
 ---
 

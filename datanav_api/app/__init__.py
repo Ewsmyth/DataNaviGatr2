@@ -10,6 +10,42 @@ from .security import hash_password
 from .mongo import ping_mongo
 
 
+REQUIRED_PRODUCTION_SETTINGS = [
+    "DATABASE_URL",
+    "MONGO_URI",
+    "SECRET_KEY",
+    "JWT_SECRET_KEY",
+    "DEFAULT_ADMIN_PASSWORD",
+]
+
+UNSAFE_PRODUCTION_VALUES = {
+    "SECRET_KEY": {"change-me-secret", "change_this_secret_key"},
+    "JWT_SECRET_KEY": {"change-me-jwt", "change_this_jwt_secret"},
+    "DEFAULT_ADMIN_PASSWORD": {"ChangeMe123!"},
+}
+
+
+def validate_production_config(app):
+    if os.getenv("APP_ENV", "").lower() != "production":
+        return
+
+    missing = [name for name in REQUIRED_PRODUCTION_SETTINGS if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(
+            "Missing production environment variables: " + ", ".join(missing)
+        )
+
+    unsafe = [
+        name
+        for name, unsafe_values in UNSAFE_PRODUCTION_VALUES.items()
+        if app.config.get(name) in unsafe_values
+    ]
+    if unsafe:
+        raise RuntimeError(
+            "Unsafe production default values are not allowed for: " + ", ".join(unsafe)
+        )
+
+
 def seed_roles_and_default_admin(app):
     roles_by_name = {}
     for role_name in ["admin", "auditor", "user"]:
@@ -63,6 +99,7 @@ def create_app():
     app.config["DEFAULT_ADMIN_USERNAME"] = os.getenv("DEFAULT_ADMIN_USERNAME", "admin")
     app.config["DEFAULT_ADMIN_EMAIL"] = os.getenv("DEFAULT_ADMIN_EMAIL", "admin@local")
     app.config["DEFAULT_ADMIN_PASSWORD"] = os.getenv("DEFAULT_ADMIN_PASSWORD", "ChangeMe123!")
+    app.config["ALLOW_PUBLIC_REGISTRATION"] = os.getenv("ALLOW_PUBLIC_REGISTRATION", "false").lower() == "true"
 
     db.init_app(app)
     CORS(
@@ -76,6 +113,8 @@ def create_app():
         "mongodb://admin:password@mongodb:27017/ingestion_db?authSource=admin",
     )
     app.config["MONGO_DB_NAME"] = os.getenv("MONGO_DB_NAME", "ingestion_db")
+
+    validate_production_config(app)
 
     app.register_blueprint(api_bp)
 
