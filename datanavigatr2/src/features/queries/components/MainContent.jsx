@@ -2,6 +2,11 @@ import React from "react";
 import "./MainContent.css";
 import QueryTable from "./QueryTable";
 
+/*
+ * Main workspace body.
+ * It decides whether to show login/permission/loading states, a project/folder
+ * contents view, or the full QueryTable for the currently opened saved query.
+ */
 function MainContent({
   selectedItem,
   selectedProject,
@@ -66,6 +71,10 @@ function MainContent({
     );
   }
 
+  /*
+   * Normalizes the selected sidebar item into the title, subtitle, folders, and
+   * saved queries that the project/folder landing view needs.
+   */
   function getMainContentData() {
     if (!selectedProject) {
       return {

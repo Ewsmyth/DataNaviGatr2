@@ -1,6 +1,11 @@
 import React, { useState } from "react";
 import "./Sidebar.css";
 
+/*
+ * Left project/folder navigation for the query workspace.
+ * The component owns only sidebar UI state (collapsed or expanded); project and
+ * folder data changes are delegated back to QueryWorkspacePage through props.
+ */
 function Sidebar({
   projects,
   selectedItem,
@@ -19,6 +24,10 @@ function Sidebar({
     setIsCollapsed((prev) => !prev);
   }
 
+  /*
+   * Every mutating action checks authentication and the user role before calling
+   * the parent. The parent performs the API request and updates project state.
+   */
   function createProject() {
     if (!isAuthenticated) {
       onRequireLogin("You need to log in to use this feature.");
@@ -36,6 +45,9 @@ function Sidebar({
     onCreateProject(projectName.trim());
   }
 
+  /*
+   * Selects project-level contents in MainContent.
+   */
   function selectProject(projectId) {
     if (!isAuthenticated || !hasUserRole) {
       onRequireLogin("You need the user role to access project data.");
@@ -49,6 +61,9 @@ function Sidebar({
     });
   }
 
+  /*
+   * Selects one folder's saved queries in MainContent.
+   */
   function selectFolder(projectId, folderId) {
     if (!isAuthenticated || !hasUserRole) {
       onRequireLogin("You need the user role to access folder data.");

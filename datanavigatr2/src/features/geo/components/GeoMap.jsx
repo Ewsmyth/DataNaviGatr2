@@ -22,6 +22,11 @@ const MARKER_CLUSTER_SCRIPT_URL =
 const LEAFLET_DRAW_SCRIPT_URL =
   "https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js";
 
+/*
+ * Loads a CSS file once and resolves when the browser has applied it.
+ * GeoMap pulls Leaflet from CDN at runtime, so the React bundle does not need to
+ * include Leaflet as a compile-time dependency.
+ */
 function loadStylesheet(url) {
   const existing = document.querySelector(`link[href="${url}"]`);
   if (existing) return Promise.resolve();
@@ -36,6 +41,10 @@ function loadStylesheet(url) {
   });
 }
 
+/*
+ * Loads a script tag once and waits for an existing in-progress script if
+ * another GeoMap instance already requested it.
+ */
 function loadScript(url) {
   const existing = document.querySelector(`script[src="${url}"]`);
   if (existing) {
@@ -60,6 +69,10 @@ function loadScript(url) {
   });
 }
 
+/*
+ * Loads Leaflet, marker clustering, and drawing tools in dependency order.
+ * CSS can load in parallel, but plugin scripts wait until Leaflet itself exists.
+ */
 async function loadLeafletRuntime() {
   await Promise.all([
     loadStylesheet(LEAFLET_CSS_URL),
@@ -79,6 +92,10 @@ async function loadLeafletRuntime() {
   return L;
 }
 
+/*
+ * Leaflet draw can return nested coordinate arrays depending on shape type.
+ * This helper unwraps those arrays to a simple polygon/list of lat/lng points.
+ */
 function flattenLatLngs(latLngs) {
   if (!Array.isArray(latLngs)) return [];
   if (latLngs.length === 0) return [];
@@ -86,12 +103,27 @@ function flattenLatLngs(latLngs) {
   return flattenLatLngs(latLngs[0]);
 }
 
+/*
+ * Selection gestures replace the current selection by default. Holding Ctrl/Cmd
+ * adds matching rows to the existing selection.
+ */
 function getSelectionMode(event) {
   const originalEvent = event?.originalEvent || event;
   return originalEvent?.ctrlKey || originalEvent?.metaKey ? "add" : "replace";
 }
 
+/*
+ * Interactive map for saved query rows.
+ * It reads rows from sessionStorage/BroadcastChannel state, turns them into
+ * marker and track features, supports rectangular/polygon/freeform selection,
+ * and broadcasts selected row ids back to QueryTable.
+ */
 function GeoMap({ queryId, initialState, onStateRequest }) {
+  /*
+   * Refs hold Leaflet objects because Leaflet mutates map/layer instances outside
+   * React's render cycle. React state tracks only user-visible readiness/errors
+   * and the current selected ids.
+   */
   const [geoState, setGeoState] = useState(initialState);
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
   const [leafletReady, setLeafletReady] = useState(Boolean(window.L));
@@ -238,6 +270,11 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
     requestAnimationFrame(() => map.invalidateSize());
     window.setTimeout(() => map.invalidateSize(), 250);
 
+    /*
+     * Shared selection routine for polygon and freeform lasso tools. It compares
+     * every mapped point against the drawn polygon and then broadcasts the row ids
+     * so QueryTable can highlight matching table rows.
+     */
     function selectByPolygon(latLngs, mode = "replace") {
       if (latLngs.length < 3) return;
       const nextSelection =
@@ -257,6 +294,10 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
       });
     }
 
+    /*
+     * Leaflet Draw creates rectangles and polygons. Rectangles can use bounds
+     * checks; polygons use the general point-in-polygon helper.
+     */
     map.on(L.Draw.Event.CREATED, (event) => {
       drawnLayer.clearLayers();
       drawnLayer.addLayer(event.layer);
@@ -286,6 +327,10 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
       selectByPolygon(flattenLatLngs(event.layer.getLatLngs()), getSelectionMode(event));
     });
 
+    /*
+     * Freeform lasso state is tracked manually with map mouse events. While
+     * enabled, dragging is disabled so pointer movement draws instead of pans.
+     */
     map.on("mousedown", (event) => {
       const lassoState = lassoStateRef.current;
       if (!lassoState.enabled) return;
@@ -321,13 +366,26 @@ function GeoMap({ queryId, initialState, onStateRequest }) {
     };
   }, [leafletReady, queryId]);
 
+  /*
+   * Event handlers registered with Leaflet close over values from the render
+   * when they were created. Refs keep those handlers pointed at the latest
+   * feature and selection sets without rebuilding the map.
+   */
   const featuresRef = useRef(features);
   const selectedRowIdsRef = useRef(selectedRowIds);
 
+  /*
+   * Rebuilds map layers whenever query rows change. Markers go into the cluster
+   * layer; movement/collection tracks go into a separate polyline layer.
+   */
   useEffect(() => {
     featuresRef.current = features;
   }, [features]);
 
+  /*
+   * Applies visual selection state to existing Leaflet layers without recreating
+   * every marker/polyline.
+   */
   useEffect(() => {
     selectedRowIdsRef.current = selectedRowIds;
   }, [selectedRowIds]);

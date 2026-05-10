@@ -14,6 +14,14 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from werkzeug.utils import secure_filename
 
+"""
+Standalone ingest API.
+
+This service accepts admin-authenticated JSON uploads, stages files, validates
+collector/organization/default-location metadata, normalizes each record into a
+consistent Mongo document, and inserts records into the ingest collection.
+"""
+
 app = Flask(__name__)
 CORS(app, origins=[os.getenv("CORS_ORIGIN", "*")])
 
@@ -36,6 +44,7 @@ mongo_collection = mongo_db[MONGO_COLLECTION_NAME]
 
 
 def _get_bearer_token():
+    """Extract the Bearer token from the Authorization header, if present."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         return None
@@ -43,6 +52,7 @@ def _get_bearer_token():
 
 
 def admin_token_required(fn):
+    """Require a valid access token with the admin role for ingest operations."""
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if not JWT_SECRET_KEY:
@@ -69,10 +79,12 @@ def admin_token_required(fn):
 
 
 def allowed_file(filename: str) -> bool:
+    """Return True when an uploaded filename is a JSON file."""
     return filename.lower().endswith(".json")
 
 
 def validate_collector_code(value: str) -> str:
+    """Normalize and validate the two-character collector code."""
     value = (value or "").strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{2}", value):
         raise ValueError("Collector Code must be exactly 2 alphanumeric characters.")
@@ -80,6 +92,7 @@ def validate_collector_code(value: str) -> str:
 
 
 def validate_organization_code(value: str) -> str:
+    """Normalize and validate the five-character organization code."""
     value = (value or "").strip().upper()
     if not re.fullmatch(r"[A-Z0-9]{5}", value):
         raise ValueError("Organization Code must be exactly 5 alphanumeric characters.")
@@ -97,6 +110,7 @@ def get_file_timestamp(uploaded_file) -> datetime:
 
 
 def build_base_filename(org_code: str, collector_code: str, ts: datetime) -> str:
+    """Create the stable prefix used for staged ingest filenames."""
     return f"{org_code}_{collector_code}_{ts.strftime('%Y-%m-%d_%H-%M-%S')}"
 
 
@@ -114,12 +128,14 @@ def get_unique_filename(base_name: str, extension: str = ".json") -> str:
 
 
 def stage_uploaded_file(uploaded_file, new_filename: str) -> Path:
+    """Save one Werkzeug uploaded file into the temporary ingest directory."""
     staged_path = Path(UPLOAD_TMP_DIR) / new_filename
     uploaded_file.save(staged_path)
     return staged_path
 
 
 def normalize_ingest_payload(parsed_json):
+    """Ensure uploaded JSON is represented as a list of record dictionaries."""
     if isinstance(parsed_json, dict):
         return [parsed_json]
     if isinstance(parsed_json, list):
@@ -130,6 +146,7 @@ def normalize_ingest_payload(parsed_json):
 
 
 def parse_float(value, label):
+    """Parse a required numeric input and include the field label in errors."""
     try:
         return float(str(value).strip())
     except (TypeError, ValueError):
@@ -137,6 +154,7 @@ def parse_float(value, label):
 
 
 def parse_int(value, label):
+    """Parse a required integer input and include the field label in errors."""
     try:
         return int(str(value).strip())
     except (TypeError, ValueError):
@@ -144,6 +162,7 @@ def parse_int(value, label):
 
 
 def parse_altitude(values):
+    """Parse optional altitude, defaulting to zero meters when omitted."""
     altitude = values.get("altitude")
     if altitude is None or str(altitude).strip() == "":
         return 0.0
@@ -151,6 +170,7 @@ def parse_altitude(values):
 
 
 def validate_lat_lon(latitude, longitude):
+    """Validate decimal latitude and longitude bounds."""
     if not -90 <= latitude <= 90:
         raise ValueError("Latitude must be between -90 and 90.")
     if not -180 <= longitude <= 180:
@@ -158,6 +178,7 @@ def validate_lat_lon(latitude, longitude):
 
 
 def parse_dms(value, label):
+    """Parse a degrees/minutes/seconds coordinate with optional N/S/E/W suffix."""
     text = str(value or "").strip().upper()
     direction_match = re.search(r"([NSEW])$", text)
     direction = direction_match.group(1) if direction_match else ""
@@ -181,6 +202,7 @@ def parse_dms(value, label):
 
 
 def utm_to_lat_lon(zone, hemisphere, easting, northing):
+    """Convert UTM coordinates to decimal latitude/longitude."""
     if not 1 <= zone <= 60:
         raise ValueError("UTM zone must be between 1 and 60.")
 
@@ -270,6 +292,7 @@ def utm_to_lat_lon(zone, hemisphere, easting, northing):
 
 
 def mgrs_to_utm(mgrs_value):
+    """Parse an MGRS coordinate into UTM zone, hemisphere, easting, and northing."""
     text = re.sub(r"\s+", "", str(mgrs_value or "").upper())
     match = re.fullmatch(r"(\d{1,2})([C-HJ-NP-X])([A-HJ-NP-Z]{2})(\d*)", text)
     if not match:
@@ -316,6 +339,7 @@ def mgrs_to_utm(mgrs_value):
 
 
 def lat_to_utm_northing(latitude, zone):
+    """Approximate UTM northing at a latitude for MGRS band alignment."""
     central_meridian = math.radians((zone - 1) * 6 - 180 + 3)
     lat_rad = math.radians(latitude)
     lon_rad = central_meridian
@@ -351,6 +375,7 @@ def lat_to_utm_northing(latitude, zone):
 
 
 def lat_lon_alt_to_ecef(latitude, longitude, altitude):
+    """Convert WGS84 latitude/longitude/altitude into ECEF x/y/z meters."""
     a = 6378137.0
     eccentricity_squared = 6.69437999014e-3
     lat_rad = math.radians(latitude)
@@ -374,6 +399,12 @@ def lat_lon_alt_to_ecef(latitude, longitude, altitude):
 
 
 def build_default_location(default_location_payload, record_time=None):
+    """
+    Convert the optional default GPS form payload into a normalized location.
+
+    Supports decimal degrees, DMS, UTM, and MGRS, then adds ECEF coordinates so
+    downstream table/map views can use the same location shape as uploaded data.
+    """
     if not default_location_payload:
         return None
 
@@ -413,6 +444,7 @@ def build_default_location(default_location_payload, record_time=None):
 
 
 def parse_default_location_payload(raw_value):
+    """Parse and validate the default_location multipart field."""
     if not raw_value:
         return None
     try:
@@ -426,21 +458,25 @@ def parse_default_location_payload(raw_value):
 
 
 def document_has_locations(doc):
+    """Return True when an uploaded source record already has location samples."""
     locations = doc.get("locations")
     return isinstance(locations, list) and any(isinstance(item, dict) for item in locations)
 
 
 def first_dict(value):
+    """Return the first dict from a list, or an empty dict for missing data."""
     if isinstance(value, list) and value and isinstance(value[0], dict):
         return value[0]
     return {}
 
 
 def copy_keys(source, keys):
+    """Copy selected keys from one dict when they exist."""
     return {key: source[key] for key in keys if key in source}
 
 
 def build_collection_location(location):
+    """Build the explicit collection-platform location object stored in normalized rows."""
     if not location:
         return None
 
@@ -465,6 +501,7 @@ def build_collection_location(location):
 
 
 def build_collection_geo(location):
+    """Build a GeoJSON point from a collection location."""
     if not location:
         return None
 
@@ -480,6 +517,7 @@ def build_collection_geo(location):
 
 
 def build_collection_location_track(locations):
+    """Convert multiple source locations into a normalized collection track."""
     track = []
     for location in locations:
         if not isinstance(location, dict):
@@ -491,11 +529,13 @@ def build_collection_location_track(locations):
 
 
 def build_source_fingerprint(doc):
+    """Hash the source record contents to produce a stable dedupe/audit identifier."""
     payload = json.dumps(doc, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def normalize_gsm_document(doc):
+    """Normalize a GSM export record into the flattened fields used by search/table/map views."""
     attachments = doc.get("attachments") if isinstance(doc.get("attachments"), list) else []
     primary_attachment = first_dict(attachments)
     body = primary_attachment.get("body") if isinstance(primary_attachment.get("body"), dict) else {}
@@ -566,6 +606,7 @@ def normalize_gsm_document(doc):
 
 
 def normalize_document(doc):
+    """Dispatch record normalization by signal type, falling back to a minimal record."""
     signal_type = str(doc.get("signal_type") or "").upper()
     if signal_type == "GSM":
         return normalize_gsm_document(doc)
@@ -578,6 +619,7 @@ def normalize_document(doc):
 
 
 def add_default_location_if_missing(doc, default_location_payload):
+    """Attach the default GPS location only when the source record has no locations."""
     if not default_location_payload or document_has_locations(doc):
         return doc
 
@@ -598,6 +640,7 @@ def enrich_documents(
     organization_code,
     default_location_payload=None,
 ):
+    """Yield Mongo-ready documents with normalized data and ingest metadata attached."""
     ingested_at = datetime.now(timezone.utc).isoformat()
 
     for doc in documents:
@@ -616,6 +659,7 @@ def enrich_documents(
 
 
 def insert_documents(documents):
+    """Insert documents into Mongo in batches and return the inserted count."""
     inserted_count = 0
     batch = []
 
@@ -635,6 +679,7 @@ def insert_documents(documents):
 
 @app.get("/")
 def service_info():
+    """Small root endpoint describing the ingest service."""
     return jsonify({
         "service": "ingest-api",
         "status": "ok",
@@ -646,6 +691,7 @@ def service_info():
 @app.get("/api/health")
 @app.get("/api/ingest/health")
 def health():
+    """Health endpoint that verifies MongoDB connectivity."""
     try:
         mongo_client.admin.command("ping")
         mongo_ok = True
@@ -668,6 +714,7 @@ def health():
 @app.post("/api/ingest/upload")
 @admin_token_required
 def upload_files():
+    """Upload, stage, normalize, and insert one or more JSON files."""
     try:
         collector_code = validate_collector_code(request.form.get("collector_code"))
         organization_code = validate_organization_code(request.form.get("organization_code"))
@@ -783,6 +830,7 @@ def upload_files():
 @app.post("/api/ingest/final")
 @admin_token_required
 def final_ingest():
+    """Legacy single-file ingest endpoint kept for older clients."""
     if "file" not in request.files:
         return jsonify({"error": "No file field named 'file' found in request."}), 400
 

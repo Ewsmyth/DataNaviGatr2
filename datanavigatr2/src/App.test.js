@@ -2,6 +2,11 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 
+/*
+ * Smoke test for the landing menu. MemoryRouter provides routing context without
+ * starting a real browser history, and the assertions make sure the expected
+ * menu destinations render.
+ */
 test('renders landing navigation', () => {
   render(
     <MemoryRouter>

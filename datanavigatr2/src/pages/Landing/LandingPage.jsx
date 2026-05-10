@@ -1,8 +1,16 @@
 import React from "react";
 import { Link } from "react-router-dom";
 
+/*
+ * First screen/menu for the local deployment.
+ * Internal app destinations use React Router links, while Portainer is an
+ * external service URL derived from the current host unless explicitly set.
+ */
 function LandingPage() {
   const currentHostname = window.location.hostname || "localhost";
+  /*
+   * Defaults Portainer to the same host as the app on its standard HTTPS port.
+   */
   const portainerUrl =
     process.env.REACT_APP_PORTAINER_URL || `https://${currentHostname}:9443`;
 

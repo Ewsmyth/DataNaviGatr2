@@ -1,3 +1,9 @@
+/*
+ * Query templates drive the "New Query" modal and the backend translator.
+ * Each object describes the form fields shown to the user; the template id is
+ * sent to the API, where query_translator.py turns the same field keys into a
+ * Mongo collection, filter, projection, sort, and limit.
+ */
 export const DEFAULT_TEMPLATES = [
   {
     id: "custom-query-builder",

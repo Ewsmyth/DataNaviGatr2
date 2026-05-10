@@ -2,6 +2,11 @@ import React from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
+/*
+ * Draggable column item used inside the table layout editor.
+ * column supplies the display label/key; containerId tells dnd-kit whether the
+ * item currently lives in the available or visible column list.
+ */
 function LayoutColumnItem({ column, containerId }) {
   const {
     attributes,
@@ -18,6 +23,10 @@ function LayoutColumnItem({ column, containerId }) {
     },
   });
 
+  /*
+   * dnd-kit gives transforms as structured values. CSS.Transform serializes them
+   * into the inline style React can apply while dragging.
+   */
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,

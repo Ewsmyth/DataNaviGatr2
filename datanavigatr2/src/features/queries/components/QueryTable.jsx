@@ -39,12 +39,28 @@ const API_BASE_URL = process.env.REACT_APP_API_BASE_URL ?? "";
 const AVAILABLE_CONTAINER_ID = "available-columns";
 const VISIBLE_CONTAINER_ID = "visible-columns";
 
+/*
+ * Main saved-query result table.
+ * This component owns the analyst-facing table behavior: dynamic columns,
+ * filtering, multi-column sorting, grouping, saved layouts, SARNEG export, and
+ * synchronization with the separate GeoNaviGatr map window.
+ */
 function QueryTable({ query, accessToken, loadingProgress }) {
+  /*
+   * query.tableData is the current batch of saved Mongo result rows. The loading
+   * counters come from QueryWorkspacePage while it incrementally fetches result
+   * pages from the API.
+   */
   const tableRows = query.tableData || [];
   const loadedResultCount = loadingProgress?.loaded ?? tableRows.length;
   const totalResultCount = loadingProgress?.total ?? query.resultCount ?? tableRows.length;
   const isLoadingResults = Boolean(loadingProgress?.isLoading);
 
+  /*
+   * Starts with known normalized columns, then scans the actual rows for extra
+   * top-level keys so unusual Mongo fields still become available in the layout
+   * editor and table without code changes.
+   */
   const derivedColumns = useMemo(() => {
     const knownKeys = new Set(DEFAULT_COLUMNS.map((column) => column.key));
     const extraKeys = new Set();
@@ -73,6 +89,13 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     [derivedColumns]
   );
 
+  /*
+   * Table state is deliberately split by concern:
+   * visibleColumnKeys controls column order/visibility, filters and sortConfigs
+   * control row reduction/order, groupedColumnKeys creates collapsible groups,
+   * savedLayouts persists preferred column sets, and selectedGeoRowIds mirrors
+   * map selections sent from GeoNaviGatr.
+   */
   const [visibleColumnKeys, setVisibleColumnKeys] = useState(
     DEFAULT_COLUMNS.map((column) => column.key)
   );
@@ -112,6 +135,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     })
   );
 
+  /*
+   * When a new query has different fields, keep any visible columns that still
+   * exist and fall back to the default set if nothing survives.
+   */
   useEffect(() => {
     setVisibleColumnKeys((current) => {
       const existingKeys = new Set(derivedColumns.map((column) => column.key));
@@ -127,6 +154,11 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     });
   }, [derivedColumns]);
 
+  /*
+   * Keeps all column-dependent state valid as derived columns change. This
+   * prevents old filters, sorts, groups, or open menus from pointing at fields
+   * that are not present in the newly opened query.
+   */
   useEffect(() => {
     setFilters((current) => {
       const next = { ...current };
@@ -158,6 +190,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     });
   }, [derivedColumns, columnMap]);
 
+  /*
+   * Loads the current user's saved column layouts. Layouts are stored server-side
+   * because they should follow the analyst across browser sessions.
+   */
   useEffect(() => {
     setGroupedColumnKeys((current) =>
       current.filter((key) => visibleColumnKeys.includes(key))
@@ -169,6 +205,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     });
   }, [visibleColumnKeys]);
 
+  /*
+   * Closes popups when the user clicks elsewhere or presses Escape. The refs
+   * identify each floating control so unrelated clicks can dismiss it cleanly.
+   */
   useEffect(() => {
     if (!accessToken) {
       setSavedLayouts([]);
@@ -266,6 +306,11 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     };
   }, []);
 
+  /*
+   * Derived render collections for the layout builder. visibleColumns preserves
+   * user order, while hiddenColumns is alphabetized so the source list is easier
+   * to scan.
+   */
   const visibleColumns = useMemo(() => {
     return visibleColumnKeys
       .map((key) => columnMap.get(key))
@@ -288,6 +333,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     return columnMap.get(activeDraggedColumnKey) || null;
   }, [columnMap, activeDraggedColumnKey]);
 
+  /*
+   * Applies every active column filter to every row. A row stays visible only
+   * when all columns match their current filter state.
+   */
   const filteredRows = useMemo(() => {
     return tableRows.filter((row) =>
       derivedColumns.every((column) =>
@@ -296,6 +345,11 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     );
   }, [tableRows, filters, derivedColumns]);
 
+  /*
+   * Applies multi-column sorting in the order the user clicked columns. Numeric
+   * columns compare as numbers; everything else compares as formatted lowercase
+   * text so arrays/objects sort consistently with what the user sees.
+   */
   const sortedRows = useMemo(() => {
     const rows = [...filteredRows];
 
@@ -330,6 +384,11 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     return rows;
   }, [filteredRows, sortConfigs, columnMap]);
 
+  /*
+   * Builds collapsible group records from the sorted rows. The group key is a
+   * JSON array of displayed group values so grouping by multiple columns remains
+   * stable even when values contain punctuation.
+   */
   const groupedRows = useMemo(() => {
     if (groupedColumnKeys.length === 0) {
       return [];
@@ -362,12 +421,21 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     return Array.from(groups.values());
   }, [sortedRows, groupedColumnKeys]);
 
+  /*
+   * Stable row identities are shared with the map view. Keeping them in a Map
+   * avoids recomputing identity paths repeatedly during render.
+   */
   const rowIdentityMap = useMemo(() => {
     return new Map(
       sortedRows.map((row, index) => [row, getRowIdentity(row, index)])
     );
   }, [sortedRows]);
 
+  /*
+   * The table renders one flattened list whether grouped or ungrouped. Group
+   * rows and child rows have different type values so the JSX can render headers
+   * and data rows from the same array.
+   */
   const displayRows = useMemo(() => {
     if (groupedColumnKeys.length === 0) {
       return sortedRows.map((row, index) => ({
@@ -401,6 +469,11 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     hasActiveFilter(column.key)
   ).length;
 
+  /*
+   * Publishes the latest sorted query rows to GeoNaviGatr and listens for map
+   * selections. The map can also request a fresh state if it opens after the
+   * table has already written sessionStorage.
+   */
   useEffect(() => {
     setSelectedGeoRowIds(new Set());
   }, [query.id]);
@@ -442,6 +515,11 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     };
   }, [query, sortedRows]);
 
+  /*
+   * Cycles a column through unsorted -> ascending -> descending -> unsorted.
+   * Multiple sorted columns are kept, so later clicks become secondary/tertiary
+   * sort keys instead of replacing the existing sort.
+   */
   function handleSort(columnKey) {
     setSortConfigs((current) => {
       const existingConfig = current.find((config) => config.key === columnKey);
@@ -512,6 +590,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     });
   }
 
+  /*
+   * Merges partial filter edits from dropdowns/inputs into the full filter state
+   * for one column.
+   */
   function updateFilter(columnKey, updates) {
     setFilters((current) => ({
       ...current,
@@ -542,6 +624,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     return String(filter.value || "").trim() !== "";
   }
 
+  /*
+   * dnd-kit gives ids for dragged items and drop targets. This resolves either
+   * kind of id to the logical source/destination bucket in the layout editor.
+   */
   function getContainerId(itemId) {
     if (itemId === AVAILABLE_CONTAINER_ID || itemId === VISIBLE_CONTAINER_ID) {
       return itemId;
@@ -566,6 +652,11 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     setActiveDraggedColumnKey(null);
   }
 
+  /*
+   * Handles all layout-builder drag outcomes: hide a visible column, show a
+   * hidden column, or reorder visible columns. It guards against hiding the last
+   * column because the table needs at least one visible field.
+   */
   function handleDragEnd(event) {
     const { active, over } = event;
     setActiveDraggedColumnKey(null);
@@ -634,6 +725,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     }
   }
 
+  /*
+   * Applies saved layout columns after removing duplicates and columns that are
+   * not available for the currently opened query.
+   */
   function applyLayoutColumns(columnKeys) {
     const availableKeys = new Set(derivedColumns.map((column) => column.key));
     const normalizedKeys = [];
@@ -657,6 +752,9 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     );
   }
 
+  /*
+   * Persists the current visible column order for the logged-in user.
+   */
   async function handleSaveLayout() {
     const trimmedName = layoutName.trim();
     if (!trimmedName) {
@@ -719,6 +817,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     applyLayoutColumns(layout.columns || []);
   }
 
+  /*
+   * Opens the map in a new app route after writing the current sorted rows into
+   * sessionStorage/BroadcastChannel so the map has data immediately.
+   */
   function openGeoNaviGatr() {
     const payload = writeGeoQueryState(query, sortedRows);
     postGeoMessage({
@@ -730,6 +832,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     window.open(`/app/geo/${query.id}`, "_blank");
   }
 
+  /*
+   * SARNEG export encodes digits 0-9 using a user-supplied 10-letter alphabet.
+   * The key must be exactly ten unique uppercase letters, one per digit.
+   */
   function validateSarnegKey(key) {
     const normalizedKey = key.trim().toUpperCase();
 
@@ -775,6 +881,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     return `${safeQueryName || "query"}_${safeColumnName || "column"}_sarneg.txt`;
   }
 
+  /*
+   * Exports unique numeric values from one column after SARNEG encoding them.
+   * Non-numeric values are rejected because the encoding maps only digits.
+   */
   function downloadSarnegColumn() {
     const validation = validateSarnegKey(sarnegKey);
     if (validation.error) {

@@ -1,3 +1,9 @@
+/*
+ * Baseline columns for saved query result tables.
+ * These keys are dot paths into normalized Mongo result rows. QueryTable also
+ * detects additional keys at runtime, but this list gives important ingest,
+ * cellular, and collection-location fields stable labels and filter types.
+ */
 export const DEFAULT_COLUMNS = [
   { key: "_id", label: "ID", type: "number" },
   { key: "normalized.record_type", label: "RECORD_TYPE", type: "text" },

@@ -1,6 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import "./TopNavBar.css";
 
+/*
+ * Top navigation for the query workspace.
+ * It exposes app-level actions passed down from QueryWorkspacePage: return to
+ * the menu, create a query, switch theme, open auth/admin/audit controls, and
+ * log out.
+ */
 function TopNavbar({
   theme,
   toggleTheme,
@@ -16,6 +22,9 @@ function TopNavbar({
   const [menuOpen, setMenuOpen] = useState(false);
   const profileMenuRef = useRef(null);
 
+  /*
+   * Closes the profile dropdown when the user clicks elsewhere or presses Escape.
+   */
   useEffect(() => {
     function handleClickOutside(event) {
       if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
@@ -36,6 +45,9 @@ function TopNavbar({
     };
   }, []);
 
+  /*
+   * Role flags decide which privileged menu items appear for the current user.
+   */
   const roles = currentUser?.roles || [];
   const hasAdminRole = roles.includes("admin");
   const hasAuditorRole = roles.includes("auditor");

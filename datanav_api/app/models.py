@@ -2,8 +2,16 @@ import uuid
 from datetime import datetime, timezone
 from .database import db
 
+"""
+SQLAlchemy data model for the main DataNaviGatr API.
+
+Postgres stores application metadata: users, roles, project/folder organization,
+saved query definitions, snapshots of query results, audit records, and table
+layout preferences. Raw/normalized ingest records live in MongoDB, not here.
+"""
 
 def utcnow():
+    """Return a timezone-aware UTC timestamp for model default values."""
     return datetime.now(timezone.utc)
 
 
@@ -15,6 +23,7 @@ user_roles = db.Table(
 
 
 class User(db.Model):
+    """Application account with role assignments and owned workspaces."""
     __tablename__ = "users"
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -54,12 +63,15 @@ class User(db.Model):
     )
 
     def has_role(self, role_name: str) -> bool:
+        """Return True when the user has the named role."""
         return any(role.name == role_name for role in self.roles)
 
     def role_names(self):
+        """Return role names sorted for stable API responses and tokens."""
         return sorted(role.name for role in self.roles)
 
     def to_dict(self):
+        """Serialize safe user fields for API responses."""
         return {
             "id": self.id,
             "username": self.username,
@@ -72,6 +84,7 @@ class User(db.Model):
 
 
 class Role(db.Model):
+    """Named permission role such as admin, auditor, or user."""
     __tablename__ = "roles"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -86,6 +99,7 @@ class Role(db.Model):
 
 
 class Project(db.Model):
+    """Top-level user-owned container for folders and saved queries."""
     __tablename__ = "projects"
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -110,6 +124,7 @@ class Project(db.Model):
     )
 
     def to_dict(self):
+        """Serialize the project tree shape expected by the React sidebar."""
         return {
             "id": self.id,
             "name": self.name,
@@ -124,6 +139,7 @@ class Project(db.Model):
 
 
 class Folder(db.Model):
+    """Project sub-container that groups saved queries."""
     __tablename__ = "folders"
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -141,6 +157,7 @@ class Folder(db.Model):
     )
 
     def to_dict(self):
+        """Serialize a folder and its saved query summaries."""
         return {
             "id": self.id,
             "name": self.name,
@@ -149,6 +166,7 @@ class Folder(db.Model):
 
 
 class SavedQuery(db.Model):
+    """Saved query definition plus metadata about its stored result snapshot."""
     __tablename__ = "saved_queries"
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -182,6 +200,7 @@ class SavedQuery(db.Model):
     )
 
     def to_summary_dict(self):
+        """Return lightweight metadata for project/folder query lists."""
         return {
             "id": self.id,
             "name": self.name,
@@ -192,6 +211,12 @@ class SavedQuery(db.Model):
         }
 
     def to_detail_dict(self, include_table_data=True):
+        """
+        Return full query metadata and optionally include all saved result rows.
+
+        The API can omit tableData for large queries and let the frontend page
+        through SavedQueryResult rows separately.
+        """
         detail = {
             "id": self.id,
             "name": self.name,
@@ -215,6 +240,7 @@ class SavedQuery(db.Model):
 
 
 class SavedQueryResult(db.Model):
+    """One persisted preview row from a saved query result snapshot."""
     __tablename__ = "saved_query_results"
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -233,6 +259,7 @@ class SavedQueryResult(db.Model):
 
 
 class QueryRun(db.Model):
+    """Audit trail entry for a query execution."""
     __tablename__ = "query_runs"
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -256,6 +283,7 @@ class QueryRun(db.Model):
     user = db.relationship("User", back_populates="query_runs")
 
     def to_dict(self):
+        """Serialize query-run details for the auditing modal."""
         return {
             "id": self.id,
             "query_name": self.query_name,
@@ -274,6 +302,7 @@ class QueryRun(db.Model):
 
 
 class TableLayout(db.Model):
+    """User-saved ordered list of visible table columns."""
     __tablename__ = "table_layouts"
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -285,6 +314,7 @@ class TableLayout(db.Model):
     user = db.relationship("User", back_populates="table_layouts")
 
     def to_dict(self):
+        """Serialize a saved table layout for QueryTable."""
         return {
             "id": self.id,
             "name": self.name,

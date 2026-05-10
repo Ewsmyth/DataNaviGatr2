@@ -1,6 +1,14 @@
 from datetime import datetime, timezone
 import re
 
+"""
+Translate frontend query-template form payloads into MongoDB query documents.
+
+The React NewQueryModal sends a template id plus parameters. This module
+validates/coerces those parameters, builds Mongo filters that work across legacy
+raw fields and newer normalized fields, and normalizes returned Mongo documents
+into the shape expected by QueryTable.
+"""
 
 JSON_FIELD_PATHS = {
     "signal_type": ["signal_type"],
@@ -89,18 +97,21 @@ DEFAULT_DYNAMIC_KEYS = [
 
 
 def parse_tags(value):
+    """Turn a comma-separated tag input into a clean list of tag strings."""
     if not value:
         return []
     return [tag.strip() for tag in str(value).split(",") if tag.strip()]
 
 
 def parse_float(value):
+    """Parse an optional float form value, returning None for blanks."""
     if value in [None, ""]:
         return None
     return float(value)
 
 
 def parse_int(value):
+    """Parse an optional integer form value, returning None for blanks."""
     if value in [None, ""]:
         return None
     return int(value)
@@ -127,6 +138,7 @@ def parse_datetime_local(value):
 
 
 def parse_result_limit(value):
+    """Return an allowed result limit, falling back to 1000 for invalid input."""
     allowed_limits = {1000, 5000, 10000, 20000, 40000, 50000, 100000}
 
     if value in [None, ""]:
@@ -181,6 +193,7 @@ def build_wildcard_filter(value):
 
 
 def _unique_list(values):
+    """Deduplicate values while preserving their first-seen order."""
     seen = []
     for value in values:
         if value not in seen:
@@ -189,6 +202,7 @@ def _unique_list(values):
 
 
 def _merge_value(existing, incoming):
+    """Merge two normalized values without losing conflicting source variants."""
     if incoming in [None, "", [], {}]:
         return existing
     if existing in [None, "", [], {}]:
@@ -203,6 +217,7 @@ def _merge_value(existing, incoming):
 
 
 def _parse_any_datetime(value):
+    """Parse strings/datetime-like values into timezone-aware UTC datetimes."""
     if not value:
         return None
 
@@ -224,6 +239,7 @@ def _parse_any_datetime(value):
 
 
 def _coerce_number(value):
+    """Convert numeric strings to numbers while leaving nonnumeric values intact."""
     if value in [None, ""]:
         return None
     if isinstance(value, (int, float)):
@@ -329,6 +345,7 @@ def normalize_mongo_document(doc: dict):
 
 
 def _or_across_paths(paths, condition):
+    """Build an $or condition that applies the same comparison to several paths."""
     if not paths:
         return {}
     clauses = [{path: condition} for path in paths]
@@ -338,6 +355,7 @@ def _or_across_paths(paths, condition):
 
 
 def _merge_clause(target, clause):
+    """Merge one Mongo clause into a growing filter using $and."""
     if not clause:
         return
     if "$and" not in target:
@@ -346,6 +364,7 @@ def _merge_clause(target, clause):
 
 
 def _numeric_variants(raw_value, width=None):
+    """Return numeric/string variants so queries match padded and unpadded fields."""
     values = []
     if raw_value in [None, ""]:
         return values
@@ -369,6 +388,7 @@ def _numeric_variants(raw_value, width=None):
 
 
 def _build_numericish_match(paths, raw_value, width=None):
+    """Build a match for fields that may be stored as numbers or strings."""
     variants = _numeric_variants(raw_value, width=width)
     if not variants:
         return None
@@ -376,6 +396,7 @@ def _build_numericish_match(paths, raw_value, width=None):
 
 
 def _build_string_match(paths, raw_value):
+    """Build an exact string match across candidate paths."""
     if raw_value in [None, ""]:
         return None
     value = str(raw_value).strip()
@@ -385,6 +406,7 @@ def _build_string_match(paths, raw_value):
 
 
 def _build_regex_match(paths, raw_value):
+    """Build a case-insensitive wildcard regex match across candidate paths."""
     wildcard = build_wildcard_filter(raw_value)
     if not wildcard:
         return None
@@ -392,6 +414,7 @@ def _build_regex_match(paths, raw_value):
 
 
 def _build_range_match(paths, minimum=None, maximum=None):
+    """Build a Mongo range comparison for min/max form fields."""
     if minimum is None and maximum is None:
         return None
 
@@ -405,16 +428,19 @@ def _build_range_match(paths, minimum=None, maximum=None):
 
 
 def _escape_regex(value):
+    """Escape a value for safe literal use inside a Mongo regex."""
     return re.escape(str(value).strip())
 
 
 def _is_safe_custom_field(field):
+    """Reject custom query fields that could inject Mongo operators or invalid paths."""
     if not field:
         return False
     return all(segment and not segment.startswith("$") for segment in str(field).split("."))
 
 
 def _build_custom_condition(rule):
+    """Translate one visual custom-query condition into a Mongo clause."""
     field = str(rule.get("column") or "").strip()
     operator = rule.get("operator") or "contains"
     value = rule.get("value")
@@ -462,6 +488,7 @@ def _build_custom_condition(rule):
 
 
 def _build_custom_group(group):
+    """Recursively translate a custom-query AND/OR group into Mongo syntax."""
     if not isinstance(group, dict):
         return None
 
@@ -491,6 +518,7 @@ def _build_custom_group(group):
 
 
 def _finalize_filter(mongo_filter):
+    """Return an empty filter for no-op clauses, otherwise return the built filter."""
     clauses = mongo_filter.get("$and", [])
     if not clauses:
         return {}
@@ -500,6 +528,7 @@ def _finalize_filter(mongo_filter):
 
 
 def build_signal_search(parameters: dict):
+    """Build the Mongo query for the Signal Search template."""
     mongo_filter = {}
 
     result_limit = parse_result_limit(parameters.get("result_limit"))
@@ -535,6 +564,7 @@ def build_signal_search(parameters: dict):
 
 
 def build_device_lookup(parameters: dict):
+    """Build the Mongo query for the Device Lookup template."""
     mongo_filter = {}
 
     result_limit = parse_result_limit(parameters.get("result_limit"))
@@ -566,6 +596,7 @@ def build_device_lookup(parameters: dict):
 
 
 def build_reject_cause_analysis(parameters: dict):
+    """Build the Mongo query for the Reject Cause Analysis template."""
     mongo_filter = {}
 
     result_limit = parse_result_limit(parameters.get("result_limit"))
@@ -610,6 +641,7 @@ def build_reject_cause_analysis(parameters: dict):
 
 
 def build_custom_query_builder(parameters: dict):
+    """Build the Mongo query for the nested visual Custom Query Builder."""
     mongo_filter = {}
 
     result_limit = parse_result_limit(parameters.get("result_limit"))
@@ -642,6 +674,7 @@ TRANSLATORS = {
 
 
 def translate_query(template_id: str, parameters: dict):
+    """Dispatch a frontend template id to the correct Mongo query builder."""
     translator = TRANSLATORS.get(template_id)
     if not translator:
         raise ValueError(f"Unsupported template_id: {template_id}")

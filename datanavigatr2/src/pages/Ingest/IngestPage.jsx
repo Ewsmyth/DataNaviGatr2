@@ -5,6 +5,11 @@ const INGEST_BASE_URL =
 const API_BASE_URL =
   process.env.REACT_APP_API_BASE_URL ?? "";
 
+/*
+ * Field definitions for optional default GPS metadata applied during ingest.
+ * The frontend collects values for one coordinate system; the ingest service
+ * validates and converts that payload into latitude/longitude/ECEF fields.
+ */
 const DEFAULT_GPS_TYPES = {
   decimal_degrees: {
     label: "Latitude / Longitude",
@@ -41,7 +46,18 @@ const DEFAULT_GPS_TYPES = {
   },
 };
 
+/*
+ * Standalone ingest screen for admins.
+ * It authenticates against the main API, verifies the user has the admin role,
+ * then uploads JSON files plus collector/organization/default GPS metadata to
+ * the ingest service.
+ */
 function IngestPage() {
+  /*
+   * Authentication state is intentionally duplicated here instead of reusing the
+   * workspace page because this route can be opened directly for operational
+   * ingest work.
+   */
   const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem("accessToken") || "");
   const [currentUser, setCurrentUser] = useState(null);
   const [loginForm, setLoginForm] = useState({ identifier: "", password: "" });
@@ -56,6 +72,9 @@ function IngestPage() {
   const [defaultGpsValues, setDefaultGpsValues] = useState({});
   const isAdmin = currentUser?.roles?.includes("admin");
 
+  /*
+   * Confirms the stored token still maps to a valid user before allowing upload.
+   */
   useEffect(() => {
     if (accessToken) {
       sessionStorage.setItem("accessToken", accessToken);
@@ -91,6 +110,10 @@ function IngestPage() {
     loadCurrentUser();
   }, [accessToken]);
 
+  /*
+   * Logs in through the main API and refuses non-admin users before showing the
+   * upload form. The ingest service itself also checks the token server-side.
+   */
   async function handleAdminLogin(event) {
     event.preventDefault();
     setIsAuthLoading(true);
@@ -128,6 +151,10 @@ function IngestPage() {
     setAuthMessage("");
   }
 
+  /*
+   * Maintains the dynamic default GPS form object. Field names come from
+   * DEFAULT_GPS_TYPES, so this works for decimal degrees, DMS, UTM, and MGRS.
+   */
   function updateDefaultGpsValue(name, value) {
     setDefaultGpsValues((currentValues) => ({
       ...currentValues,
@@ -135,6 +162,11 @@ function IngestPage() {
     }));
   }
 
+  /*
+   * Builds the multipart upload sent to the ingest service.
+   * Client-side validation catches the common file/code mistakes early; the
+   * backend repeats validation and performs the actual normalization/insertion.
+   */
   async function handleIngestUpload(files) {
     if (!files || files.length === 0) {
       setMessage("Please choose at least one JSON file.");

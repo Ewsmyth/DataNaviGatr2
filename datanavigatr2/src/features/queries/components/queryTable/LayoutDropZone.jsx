@@ -1,6 +1,11 @@
 import React from "react";
 import { useDroppable } from "@dnd-kit/core";
 
+/*
+ * Droppable column bucket for the layout editor.
+ * QueryTable renders one for hidden/available columns and one for currently
+ * visible columns.
+ */
 function LayoutDropZone({ containerId, title, subtitle, children, isEmpty, emptyMessage }) {
   const { isOver, setNodeRef } = useDroppable({
     id: containerId,

@@ -9,6 +9,12 @@ from .routes import api_bp
 from .security import hash_password
 from .mongo import ping_mongo
 
+"""
+Flask application factory for the main DataNaviGatr API.
+
+This module wires together configuration, Postgres models, CORS, routes, Mongo
+health checks, default roles, and the initial admin account.
+"""
 
 REQUIRED_PRODUCTION_SETTINGS = [
     "DATABASE_URL",
@@ -26,6 +32,10 @@ UNSAFE_PRODUCTION_VALUES = {
 
 
 def validate_production_config(app):
+    """
+    Block production startup when required secrets/settings are missing or still
+    using known development defaults.
+    """
     if os.getenv("APP_ENV", "").lower() != "production":
         return
 
@@ -47,6 +57,12 @@ def validate_production_config(app):
 
 
 def seed_roles_and_default_admin(app):
+    """
+    Ensure core roles exist and create or repair the default admin account.
+
+    The default admin is intentionally limited to the admin role only; additional
+    permissions should be assigned explicitly through the admin UI.
+    """
     roles_by_name = {}
     for role_name in ["admin", "auditor", "user"]:
         role = Role.query.filter_by(name=role_name).first()
@@ -82,6 +98,12 @@ def seed_roles_and_default_admin(app):
 
 
 def create_app():
+    """
+    Build and initialize the Flask app.
+
+    The factory pattern keeps imports/test setup predictable and lets WSGI
+    servers create the app after environment variables are available.
+    """
     app = Flask(__name__)
 
     app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change_this_secret_key")
@@ -119,6 +141,8 @@ def create_app():
     app.register_blueprint(api_bp)
 
     with app.app_context():
+        # Postgres may start slower than the API container, so startup retries
+        # give docker-compose time to finish bringing the database online.
         retries = 10
         for i in range(retries):
             try:

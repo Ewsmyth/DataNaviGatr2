@@ -1,10 +1,19 @@
 import React, { useEffect, useState } from "react";
 import "./LoginModal.css";
 
+/*
+ * Reusable username/email + password modal.
+ * The modal owns only local input fields; QueryWorkspacePage performs the actual
+ * login request and passes errors/loading state back in through props.
+ */
 function LoginModal({ isOpen, onClose, onLogin, errorMessage, isLoading }) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
 
+  /*
+   * Clear credentials whenever the modal closes so passwords are not retained in
+   * hidden component state.
+   */
   useEffect(() => {
     if (!isOpen) {
       setIdentifier("");
@@ -23,6 +32,9 @@ function LoginModal({ isOpen, onClose, onLogin, errorMessage, isLoading }) {
 
   if (!isOpen) return null;
 
+  /*
+   * Sends trimmed identifier and raw password to the parent login handler.
+   */
   function handleSubmit(event) {
     event.preventDefault();
     onLogin({

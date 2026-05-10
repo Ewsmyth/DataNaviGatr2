@@ -3,6 +3,11 @@ import "../../App.css";
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL ?? "";
 
+/*
+ * Converts the records-over-time metric into SVG polyline points.
+ * width, height, and padding describe the chart box; counts are scaled against
+ * the largest bucket so the trend line fills the available vertical space.
+ */
 function buildChartPoints(recordsOverTime, width, height, padding) {
   if (!recordsOverTime.length) return "";
 
@@ -21,6 +26,11 @@ function buildChartPoints(recordsOverTime, width, height, padding) {
     .join(" ");
 }
 
+/*
+ * Reusable metric panel for breakdown lists such as records by source format or
+ * records by collector. items is an array of { label, count } objects from the
+ * API.
+ */
 function MetricList({ title, items }) {
   return (
     <section className="dataview-panel">
@@ -40,6 +50,11 @@ function MetricList({ title, items }) {
   );
 }
 
+/*
+ * Admin-only operational dashboard for database volume and ingest breakdowns.
+ * It performs its own auth check so the route can be opened directly without
+ * going through the main query workspace first.
+ */
 function DataViewPage() {
   const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem("accessToken") || "");
   const [currentUser, setCurrentUser] = useState(null);
@@ -51,6 +66,10 @@ function DataViewPage() {
   const [metricsMessage, setMetricsMessage] = useState("");
   const isAdmin = currentUser?.roles?.includes("admin");
 
+  /*
+   * Confirms the session token and loads the user so the page can enforce admin
+   * access before requesting metrics.
+   */
   useEffect(() => {
     if (accessToken) {
       sessionStorage.setItem("accessToken", accessToken);
@@ -59,6 +78,9 @@ function DataViewPage() {
     }
   }, [accessToken]);
 
+  /*
+   * Loads aggregate metrics from the API after admin authentication succeeds.
+   */
   useEffect(() => {
     async function loadCurrentUser() {
       if (!accessToken) {
@@ -118,6 +140,9 @@ function DataViewPage() {
     loadMetrics();
   }, [accessToken, isAdmin]);
 
+  /*
+   * Logs in with the main API and rejects accounts without the admin role.
+   */
   async function handleAdminLogin(event) {
     event.preventDefault();
     setIsAuthLoading(true);

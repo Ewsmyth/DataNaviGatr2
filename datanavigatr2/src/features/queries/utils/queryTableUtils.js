@@ -1,3 +1,15 @@
+/*
+ * Shared table helpers for QueryTable and any page that needs to display saved
+ * Mongo rows. These functions keep formatting, nested-path lookup, type
+ * guessing, and filter matching in one place so the table component can focus
+ * on UI state instead of data-shaping details.
+ */
+
+/*
+ * Builds the initial filter object keyed by column key.
+ * Each column starts as a blank "contains" filter because that is the most
+ * forgiving default for text, numeric strings, arrays, and object values.
+ */
 export function createDefaultFilterState(columns) {
   return columns.reduce((acc, column) => {
     acc[column.key] = { operator: "contains", value: "" };
@@ -5,6 +17,12 @@ export function createDefaultFilterState(columns) {
   }, {});
 }
 
+/*
+ * Reads a value from a row by either an exact key or a dot-separated path.
+ * The exact-key check matters because Mongo-flattened rows can legitimately
+ * contain field names with dots, while normalized records may also contain
+ * deeply nested objects that need path traversal.
+ */
 export function getValueByPath(row, key) {
   if (!row || !key) return undefined;
 
@@ -25,6 +43,11 @@ export function getValueByPath(row, key) {
     }, row);
 }
 
+/*
+ * Converts arbitrary cell values into user-readable text.
+ * Arrays are flattened into comma-separated text, objects are kept as JSON, and
+ * empty/null values become an empty string so the table does not render "null".
+ */
 export function formatCellValue(value) {
   if (value === null || value === undefined) return "";
 
@@ -46,6 +69,11 @@ export function formatCellValue(value) {
   return value;
 }
 
+/*
+ * Inspects the first meaningful value for a column and labels it as "number" or
+ * "text". QueryTable uses this to decide whether numeric filter operators
+ * should compare as numbers or fall back to string matching.
+ */
 export function inferColumnType(rows, key) {
   for (const row of rows) {
     const value = getValueByPath(row, key);
@@ -68,6 +96,10 @@ export function inferColumnType(rows, key) {
   return "text";
 }
 
+/*
+ * Turns unexpected Mongo keys into a table-friendly header label.
+ * Example: normalized.mobileCountry -> NORMALIZED_MOBILE_COUNTRY.
+ */
 export function formatDynamicLabel(key) {
   return String(key)
     .replace(/\./g, "_")
@@ -75,6 +107,12 @@ export function formatDynamicLabel(key) {
     .toUpperCase();
 }
 
+/*
+ * Applies one table filter against one cell value.
+ * rowValue is the original value from the row, filter carries the operator and
+ * typed input from the UI, and columnType tells the function when numeric
+ * comparisons are safe to attempt.
+ */
 export function matchesFilter(rowValue, filter, columnType) {
   const operator = filter?.operator || "contains";
   const rawValue = filter?.value || "";

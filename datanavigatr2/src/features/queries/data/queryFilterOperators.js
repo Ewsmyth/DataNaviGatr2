@@ -1,3 +1,8 @@
+/*
+ * Filter operations exposed by QueryTable and the custom query builder.
+ * The value is the internal operator sent through state/API payloads, while the
+ * label is what appears in dropdowns.
+ */
 export const FILTER_OPERATORS = [
   { value: "contains", label: "Contains" },
   { value: "not_contains", label: "Does not contain" },

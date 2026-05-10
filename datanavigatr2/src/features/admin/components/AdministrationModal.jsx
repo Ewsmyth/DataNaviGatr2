@@ -3,6 +3,11 @@ import "./AdministrationModal.css";
 
 const ROLE_OPTIONS = ["admin", "auditor", "user"];
 
+/*
+ * Admin modal for creating users and managing role/status assignments.
+ * All server writes are delegated to QueryWorkspacePage; this component renders
+ * forms, checkboxes, and action buttons around the user list it receives.
+ */
 function AdministrationModal({
   isOpen,
   onClose,
@@ -31,6 +36,9 @@ function AdministrationModal({
 
   if (!isOpen) return null;
 
+  /*
+   * Toggles roles on the create-user form before the user exists server-side.
+   */
   function handleRoleToggle(roleName) {
     setFormData((prev) => {
       const alreadySelected = prev.roles.includes(roleName);
@@ -43,6 +51,10 @@ function AdministrationModal({
     });
   }
 
+  /*
+   * Submits the create-user form, then resets back to a normal user account
+   * template for the next entry.
+   */
   async function handleCreateSubmit(event) {
     event.preventDefault();
     await onCreateUser(formData);

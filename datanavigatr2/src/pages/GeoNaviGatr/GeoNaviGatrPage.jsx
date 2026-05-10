@@ -13,11 +13,21 @@ import {
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL ?? "";
 const QUERY_RESULTS_BATCH_SIZE = 250;
 
+/*
+ * Route wrapper for GeoMap.
+ * It prefers query rows sent by an already-open QueryTable through
+ * sessionStorage/BroadcastChannel, but can fall back to loading the saved query
+ * directly from the API when the map route is refreshed or opened standalone.
+ */
 function GeoNaviGatrPage() {
   const { queryId } = useParams();
   const [geoState, setGeoState] = useState(() => readGeoQueryState(queryId));
   const [loadMessage, setLoadMessage] = useState("");
 
+  /*
+   * Asks any open QueryTable window/tab to resend the current rows for this
+   * query. This keeps the map in sync without polling the backend.
+   */
   const requestCurrentState = useCallback(() => {
     postGeoMessage({
       type: GEO_STATE_REQUEST_MESSAGE,
@@ -25,6 +35,11 @@ function GeoNaviGatrPage() {
     });
   }, [queryId]);
 
+  /*
+   * Fallback loader for direct map visits. It mirrors QueryWorkspacePage's
+   * batched result loading and then writes the same geo state shape used by the
+   * cross-tab sync path.
+   */
   useEffect(() => {
     const storedState = readGeoQueryState(queryId);
     if (storedState) {

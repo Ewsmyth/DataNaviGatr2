@@ -1,11 +1,25 @@
 import { getValueByPath } from "../../queries/utils/queryTableUtils";
 import { getRowIdentity } from "./geoSync";
 
+/*
+ * Converts query-result rows into map features.
+ * Ingested data has evolved over time, so this file checks several possible
+ * field shapes: normalized collection_location objects, direct latitude and
+ * longitude fields, GeoJSON coordinate arrays, and location tracks.
+ */
+
+/*
+ * Coerces strings and numbers into finite numbers for coordinate math.
+ * Invalid values return null instead of NaN so callers can explicitly skip them.
+ */
 function toNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
+/*
+ * Validates latitude/longitude ranges before a point is accepted for mapping.
+ */
 function isValidLatLng(lat, lng) {
   return (
     Number.isFinite(lat) &&
@@ -17,6 +31,11 @@ function isValidLatLng(lat, lng) {
   );
 }
 
+/*
+ * Reads a lat/lng pair from one location object.
+ * The function accepts both latitude/longitude and shorter lat/lng/lon aliases
+ * because different ingest sources use different naming conventions.
+ */
 function getLatLngFromLocation(location) {
   if (!location || typeof location !== "object") return null;
 
@@ -26,6 +45,11 @@ function getLatLngFromLocation(location) {
   return isValidLatLng(lat, lng) ? { lat, lng } : null;
 }
 
+/*
+ * Searches a row across many possible latitude and longitude paths.
+ * It returns the first valid pair, which lets older and newer record schemas map
+ * without requiring a migration.
+ */
 function getLatLngFromPaths(row, latitudePaths, longitudePaths) {
   for (const latitudePath of latitudePaths) {
     const lat = toNumber(getValueByPath(row, latitudePath));
@@ -42,6 +66,10 @@ function getLatLngFromPaths(row, latitudePaths, longitudePaths) {
   return null;
 }
 
+/*
+ * Converts a GeoJSON-style [longitude, latitude] array into the Leaflet-friendly
+ * { lat, lng } object used throughout the map code.
+ */
 function getLatLngFromCoordinates(coordinates) {
   if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
 
@@ -51,6 +79,11 @@ function getLatLngFromCoordinates(coordinates) {
   return isValidLatLng(lat, lng) ? { lat, lng } : null;
 }
 
+/*
+ * Finds the best single display point for a row.
+ * Preferred order is normalized collection location, then known lat/lon paths,
+ * then generic GeoJSON coordinate locations.
+ */
 function getPointFromRow(row) {
   const collectionLocation = getLatLngFromLocation(
     getValueByPath(row, "normalized.collection_location")
@@ -99,6 +132,10 @@ function getPointFromRow(row) {
   return null;
 }
 
+/*
+ * Extracts a row's movement/collection track when multiple location samples are
+ * available. A track with fewer than two points is ignored by the map layer.
+ */
 function getTrackFromRow(row) {
   const track =
     getValueByPath(row, "normalized.collection_location_track") ||
@@ -110,6 +147,11 @@ function getTrackFromRow(row) {
     .filter(Boolean);
 }
 
+/*
+ * Builds the full feature bundle consumed by GeoMap.
+ * points become markers, tracks become polylines, and ignoredRowCount tells the
+ * UI how many rows could not be mapped because no usable coordinates existed.
+ */
 export function buildGeoFeatures(rows) {
   const points = [];
   const tracks = [];
@@ -149,6 +191,10 @@ export function buildGeoFeatures(rows) {
   };
 }
 
+/*
+ * Ray-casting point-in-polygon test used by map rectangle/polygon/lasso
+ * selection. The point is { lat, lng }; the polygon is an array of the same.
+ */
 export function pointInPolygon(point, polygon) {
   const x = point.lng;
   const y = point.lat;

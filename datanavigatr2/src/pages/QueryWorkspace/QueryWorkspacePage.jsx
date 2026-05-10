@@ -13,13 +13,30 @@ const API_BASE_URL =
   process.env.REACT_APP_API_BASE_URL ?? "";
 const QUERY_RESULTS_BATCH_SIZE = 250;
 
+/*
+ * Primary authenticated workspace for DataNaviGatr.
+ * This page coordinates global app state: login/session, project/folder tree,
+ * saved query creation/opening, admin user management, auditing, and the main
+ * query-result table shown in MainContent.
+ */
 function QueryWorkspacePage() {
   const navigate = useNavigate();
+
+  /*
+   * Theme is stored in localStorage because it is a user preference that should
+   * survive closing the browser. Auth tokens use sessionStorage so they clear
+   * with the browser session.
+   */
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
 
   const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem("accessToken") || "");
   const [currentUser, setCurrentUser] = useState(null);
 
+  /*
+   * projects drives the sidebar tree, users feeds the admin modal, and queryRuns
+   * feeds the auditor modal. They are loaded only when the active role needs
+   * them.
+   */
   const [projects, setProjects] = useState([]);
   const [users, setUsers] = useState([]);
   const [queryRuns, setQueryRuns] = useState([]);
@@ -35,12 +52,22 @@ function QueryWorkspacePage() {
   const [isAdministrationModalOpen, setIsAdministrationModalOpen] = useState(false);
   const [isAuditingModalOpen, setIsAuditingModalOpen] = useState(false);
 
+  /*
+   * selectedItem identifies the sidebar location currently being viewed.
+   * type distinguishes whether MainContent should show project-level queries or
+   * a specific folder's queries.
+   */
   const [selectedItem, setSelectedItem] = useState({
     type: "project",
     projectId: null,
     folderId: null,
   });
 
+  /*
+   * selectedQuery holds the opened saved query metadata and progressively loaded
+   * tableData. queryResultsAbortRef cancels an in-flight result load when the
+   * user opens another query or logs out.
+   */
   const [selectedQuery, setSelectedQuery] = useState(null);
   const [queryLoadingProgress, setQueryLoadingProgress] = useState({
     isLoading: false,
@@ -55,10 +82,18 @@ function QueryWorkspacePage() {
   const hasAuditorRole = roles.includes("auditor");
   const hasUserRole = roles.includes("user");
 
+  /*
+   * Validates the stored access token by asking the API who the current user is.
+   * If the token is expired or invalid, local auth state is cleared.
+   */
   useEffect(() => {
     localStorage.setItem("theme", theme);
   }, [theme]);
 
+  /*
+   * Loads the signed-in user's projects once authentication and the required
+   * "user" role are available.
+   */
   useEffect(() => {
     if (accessToken) {
       sessionStorage.setItem("accessToken", accessToken);
@@ -218,6 +253,11 @@ function QueryWorkspacePage() {
     setIsAuditingModalOpen(false);
   }
 
+  /*
+   * Opens a saved query in two phases: first fetch lightweight query metadata,
+   * then page through saved result rows in batches. This avoids blocking the UI
+   * on very large result sets and lets QueryTable show progress.
+   */
   async function handleOpenQuery(queryId) {
     queryResultsAbortRef.current?.abort();
     const abortController = new AbortController();
@@ -320,6 +360,9 @@ function QueryWorkspacePage() {
     }
   }
 
+  /*
+   * Admin-only loader for the Administration modal.
+   */
   async function loadUsers() {
     if (!accessToken || !hasAdminRole) return;
 
@@ -338,6 +381,9 @@ function QueryWorkspacePage() {
     setUsers(data.users || []);
   }
 
+  /*
+   * Auditor-only loader for the Auditing modal.
+   */
   async function loadQueryRuns() {
     if (!accessToken || !hasAuditorRole) return;
 
@@ -374,6 +420,10 @@ function QueryWorkspacePage() {
     }
   }
 
+  /*
+   * Administration actions call the API and then refresh the modal's user list
+   * so role/status changes always reflect the server's final state.
+   */
   async function handleCreateUser(formData) {
     const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
       method: "POST",
@@ -473,6 +523,10 @@ function QueryWorkspacePage() {
     await loadQueryRuns();
   }
 
+  /*
+   * Project/folder mutations update local sidebar state after the API confirms
+   * the change, keeping the UI responsive without reloading all projects.
+   */
   async function handleCreateProject(projectName) {
     const response = await fetch(`${API_BASE_URL}/api/projects`, {
       method: "POST",
@@ -625,6 +679,10 @@ function QueryWorkspacePage() {
     }
   }
 
+  /*
+   * Opens the query modal only when the user is authenticated and has permission
+   * to create/run queries.
+   */
   function handleOpenNewQuery() {
     if (!isAuthenticated) {
       requireLogin("You need to log in to use this feature.");
@@ -639,6 +697,10 @@ function QueryWorkspacePage() {
     setIsNewQueryModalOpen(true);
   }
 
+  /*
+   * Saves and executes a new query through the API, then inserts its summary into
+   * the selected project/folder in the sidebar tree.
+   */
   async function handleCreateQuery(payload) {
     if (!isAuthenticated || !hasUserRole) {
       requireLogin("You need the user role to submit or analyze queries.");
@@ -698,6 +760,10 @@ function QueryWorkspacePage() {
     setGlobalMessage("Query saved successfully.");
   }
 
+  /*
+   * Derived sidebar selections used by MainContent so it does not need to search
+   * through the project tree itself.
+   */
   const selectedProject = useMemo(() => {
     return projects.find((project) => project.id === selectedItem.projectId) || null;
   }, [projects, selectedItem]);

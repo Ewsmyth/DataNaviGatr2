@@ -22,10 +22,19 @@ from .security import (
     verify_password,
 )
 
+"""
+HTTP routes for the main DataNaviGatr API.
+
+The API is responsible for auth/session management, project and folder metadata,
+saved query execution against MongoDB, table layouts, administration, auditing,
+DataView metrics, and raw custom Mongo query execution.
+"""
+
 api_bp = Blueprint("api", __name__)
 
 
 def _get_bearer_token():
+    """Extract the Bearer token from the Authorization header, if present."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         return None
@@ -33,6 +42,11 @@ def _get_bearer_token():
 
 
 def token_required(fn):
+    """
+    Validate an access token and store the active user on flask.g.
+
+    Routes that need identity should use this before role checks.
+    """
     from functools import wraps
 
     @wraps(fn)
@@ -65,6 +79,7 @@ def token_required(fn):
 
 
 def require_role(role_name):
+    """Decorator factory that requires g.current_user to have a named role."""
     from functools import wraps
 
     def decorator(fn):
@@ -83,6 +98,7 @@ def require_role(role_name):
 
 
 def _active_admin_count(exclude_user_id=None):
+    """Count active admins, optionally excluding one user being edited/deleted."""
     admins = (
         User.query
         .join(User.roles)
@@ -93,6 +109,7 @@ def _active_admin_count(exclude_user_id=None):
 
 
 def _would_remove_last_active_admin(user, next_is_active=None, next_roles=None):
+    """Return True if a proposed user change would leave no active admin."""
     if not user.has_role("admin"):
         return False
 
@@ -108,6 +125,7 @@ def _would_remove_last_active_admin(user, next_is_active=None, next_roles=None):
 
 @api_bp.route("/api/health", methods=["GET"])
 def health():
+    """Health check both backing stores and report degraded status on failure."""
     from .mongo import ping_mongo
     from sqlalchemy import text
 
@@ -137,6 +155,7 @@ def health():
 
 @api_bp.route("/api/auth/register", methods=["POST"])
 def register():
+    """Create a public user account when public registration is enabled."""
     if not current_app.config.get("ALLOW_PUBLIC_REGISTRATION", False):
         return jsonify({"error": "Public registration is disabled."}), 403
 
@@ -177,6 +196,7 @@ def register():
 
 @api_bp.route("/api/auth/login", methods=["POST"])
 def login():
+    """Authenticate a username/email and issue access plus refresh tokens."""
     payload = request.get_json() or {}
     identifier = (payload.get("identifier") or "").strip()
     password = payload.get("password") or ""
@@ -231,6 +251,7 @@ def login():
 
 @api_bp.route("/api/auth/refresh", methods=["POST"])
 def refresh():
+    """Use the refresh cookie to mint a new short-lived access token."""
     refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
         return jsonify({"error": "Refresh token missing."}), 401
@@ -264,6 +285,7 @@ def refresh():
 
 @api_bp.route("/api/auth/logout", methods=["POST"])
 def logout():
+    """Clear the refresh cookie on the client."""
     response = jsonify({"message": "Logged out successfully."})
     response.delete_cookie("refresh_token")
     return response, 200
@@ -272,6 +294,7 @@ def logout():
 @api_bp.route("/api/auth/me", methods=["GET"])
 @token_required
 def me():
+    """Return the authenticated user's profile."""
     return jsonify({"user": g.current_user.to_dict()}), 200
 
 
@@ -279,6 +302,7 @@ def me():
 @token_required
 @require_role("user")
 def list_projects():
+    """Return the current user's project tree for the sidebar."""
     projects = Project.query.filter_by(owner_id=g.current_user.id).all()
     return jsonify({"projects": [project.to_dict() for project in projects]}), 200
 
@@ -287,6 +311,7 @@ def list_projects():
 @token_required
 @require_role("user")
 def create_project():
+    """Create a project owned by the current user."""
     payload = request.get_json() or {}
     name = (payload.get("name") or "").strip()
 
@@ -307,6 +332,7 @@ def create_project():
 @token_required
 @require_role("user")
 def create_folder(project_id):
+    """Create a folder inside one of the current user's projects."""
     payload = request.get_json() or {}
     name = (payload.get("name") or "").strip()
 
@@ -328,6 +354,7 @@ def create_folder(project_id):
 
 
 def _delete_query_runs_for_saved_queries(saved_query_ids):
+    """Delete audit rows tied to saved queries before removing their parent."""
     if not saved_query_ids:
         return 0
 
@@ -343,6 +370,7 @@ def _delete_query_runs_for_saved_queries(saved_query_ids):
 @token_required
 @require_role("user")
 def delete_project(project_id):
+    """Delete a project and its child folders, saved queries, results, and runs."""
     project = Project.query.filter_by(id=project_id, owner_id=g.current_user.id).first()
     if not project:
         return jsonify({"error": "Project not found."}), 404
@@ -371,6 +399,7 @@ def delete_project(project_id):
 @token_required
 @require_role("user")
 def delete_folder(folder_id):
+    """Delete one folder and all saved queries/results inside it."""
     folder = (
         Folder.query
         .join(Project, Folder.project_id == Project.id)
@@ -408,6 +437,10 @@ def delete_folder(folder_id):
 @token_required
 @require_role("user")
 def create_query():
+    """
+    Translate a template payload into a Mongo query, execute it, and persist a
+    saved query snapshot plus an audit QueryRun.
+    """
     from .mongo import get_mongo_db
     from .query_translator import normalize_mongo_document, translate_query
 
@@ -520,6 +553,7 @@ def create_query():
 @token_required
 @require_role("user")
 def get_saved_query(query_id):
+    """Return saved query metadata without loading all row data."""
     saved_query = (
         SavedQuery.query
         .join(Project, SavedQuery.project_id == Project.id)
@@ -542,6 +576,7 @@ def get_saved_query(query_id):
 @token_required
 @require_role("user")
 def get_saved_query_results(query_id):
+    """Return a paginated slice of saved query result rows."""
     saved_query = (
         SavedQuery.query
         .join(Project, SavedQuery.project_id == Project.id)
@@ -596,6 +631,7 @@ def get_saved_query_results(query_id):
 @token_required
 @require_role("user")
 def list_table_layouts():
+    """Return saved table column layouts for the current user."""
     layouts = (
         TableLayout.query
         .filter_by(user_id=g.current_user.id)
@@ -609,6 +645,7 @@ def list_table_layouts():
 @token_required
 @require_role("user")
 def create_table_layout():
+    """Persist a named ordered list of visible table columns for the current user."""
     payload = request.get_json() or {}
     name = (payload.get("name") or "").strip()
     columns = payload.get("columns") or []
@@ -651,6 +688,7 @@ def create_table_layout():
 @token_required
 @require_role("admin")
 def list_users():
+    """Admin endpoint returning all users and their roles/status."""
     users = User.query.order_by(User.created_at.desc()).all()
     return jsonify({"users": [user.to_dict() for user in users]}), 200
 
@@ -659,6 +697,7 @@ def list_users():
 @token_required
 @require_role("admin")
 def admin_create_user():
+    """Admin endpoint for creating a user with selected roles."""
     payload = request.get_json() or {}
     username = (payload.get("username") or "").strip()
     email = (payload.get("email") or "").strip().lower()
@@ -699,6 +738,7 @@ def admin_create_user():
 @token_required
 @require_role("admin")
 def admin_update_user(user_id):
+    """Admin endpoint for changing user fields such as active/inactive status."""
     payload = request.get_json() or {}
     is_active = payload.get("is_active")
 
@@ -724,6 +764,7 @@ def admin_update_user(user_id):
 @token_required
 @require_role("admin")
 def admin_delete_user(user_id):
+    """Admin endpoint for deleting a user while preserving at least one active admin."""
     user = User.query.filter_by(id=user_id).first()
     if not user:
         return jsonify({"error": "User not found."}), 404
@@ -744,6 +785,7 @@ def admin_delete_user(user_id):
 @token_required
 @require_role("admin")
 def admin_update_roles(user_id):
+    """Admin endpoint for replacing a user's role assignments."""
     payload = request.get_json() or {}
     role_names = payload.get("roles") or []
 
@@ -771,6 +813,7 @@ def admin_update_roles(user_id):
 @token_required
 @require_role("auditor")
 def list_query_runs():
+    """Auditor endpoint returning query execution history."""
     query_runs = QueryRun.query.order_by(QueryRun.created_at.desc()).all()
     return jsonify({"query_runs": [query_run.to_dict() for query_run in query_runs]}), 200
 
@@ -779,6 +822,7 @@ def list_query_runs():
 @token_required
 @require_role("auditor")
 def update_query_run_review(run_id):
+    """Auditor endpoint for marking a query run approved, flagged, or unreviewed."""
     payload = request.get_json() or {}
     auditor_state = payload.get("auditor_state")
     auditor_notes = payload.get("auditor_notes") or ""
@@ -801,6 +845,7 @@ def update_query_run_review(run_id):
 
 
 def _parse_record_day(raw_value):
+    """Normalize a raw timestamp-like value into a YYYY-MM-DD metric bucket."""
     if not raw_value:
         return "Unknown"
 
@@ -823,6 +868,7 @@ def _parse_record_day(raw_value):
 
 
 def _first_present(*values):
+    """Return the first non-empty value or Unknown for metric bucketing."""
     for value in values:
         if value not in [None, ""]:
             return value
@@ -833,6 +879,7 @@ def _first_present(*values):
 @token_required
 @require_role("admin")
 def dataview_metrics():
+    """Build aggregate Mongo record counts for the admin DataView dashboard."""
     from .mongo import get_mongo_db
 
     db_mongo = get_mongo_db()
@@ -867,6 +914,7 @@ def dataview_metrics():
         signal_counts[str(_first_present(normalized.get("signal_type"), record.get("signal_type")))] += 1
 
     def counter_items(counter):
+        """Convert a Counter into API rows sorted by count descending then label."""
         return [
             {"label": label, "count": count}
             for label, count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
@@ -888,6 +936,7 @@ def dataview_metrics():
 @token_required
 @require_role("admin")
 def run_mongo_query():
+    """Admin endpoint for running a bounded ad hoc Mongo query and auditing it."""
     from .mongo import get_mongo_db
 
     payload = request.get_json() or {}

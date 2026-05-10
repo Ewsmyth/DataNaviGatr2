@@ -1,7 +1,15 @@
 import React, { useEffect } from "react";
 import "./AuditingModal.css";
 
+/*
+ * Auditor modal for reviewing historical query runs.
+ * queryRuns are loaded by QueryWorkspacePage; this component displays each run's
+ * user, parameters, translated status, notes, and review actions.
+ */
 function AuditingModal({ isOpen, onClose, queryRuns, onRefresh, onReview }) {
+  /*
+   * Escape closes the modal, matching the login and admin modal behavior.
+   */
   useEffect(() => {
     function handleEscape(event) {
       if (event.key === "Escape" && isOpen) onClose();

@@ -7,6 +7,12 @@ import { buildInitialValues } from "../utils/queryForm";
 
 const DEFAULT_CUSTOM_OPERATOR = "contains";
 const CUSTOM_OPERATOR_OPTIONS = FILTER_OPERATORS;
+
+/*
+ * Columns available to the visual custom query builder. It starts from the
+ * table's default columns and adds any important normalized fields that should
+ * be searchable even if they are not part of the base table definition.
+ */
 const CUSTOM_QUERY_COLUMNS = [
   ...DEFAULT_COLUMNS,
   { key: "normalized.mobile_country", label: "MOBILE_COUNTRY", type: "text" },
@@ -14,6 +20,11 @@ const CUSTOM_QUERY_COLUMNS = [
   columns.findIndex((item) => item.key === column.key) === index
 );
 
+/*
+ * Creates one leaf rule in the custom query tree.
+ * A condition is one field/operator/value comparison that the backend converts
+ * into a Mongo clause.
+ */
 function createCondition() {
   const column = CUSTOM_QUERY_COLUMNS[0] || { key: "", label: "", type: "text" };
 
@@ -26,6 +37,10 @@ function createCondition() {
   };
 }
 
+/*
+ * Creates a nested rule group. Groups contain conditions or other groups and
+ * choose how their children combine: all children (AND) or any child (OR).
+ */
 function createGroup() {
   return {
     type: "group",
@@ -34,6 +49,10 @@ function createGroup() {
   };
 }
 
+/*
+ * Immutably updates a rule or group inside the nested custom-query tree.
+ * path is an array of child indexes; [] means "update the root object".
+ */
 function updateRuleAtPath(rule, path, updater) {
   if (path.length === 0) {
     return updater(rule);
@@ -48,6 +67,10 @@ function updateRuleAtPath(rule, path, updater) {
   };
 }
 
+/*
+ * Immutably removes a child from the nested custom-query tree.
+ * The path points to the item to remove inside the root group's rules array.
+ */
 function removeRuleAtPath(rule, path) {
   if (path.length === 0) {
     return rule;
@@ -69,6 +92,11 @@ function removeRuleAtPath(rule, path) {
   };
 }
 
+/*
+ * Recursive UI for editing custom query groups.
+ * It renders the group's join operator, add buttons, and every child condition
+ * or nested group. depth only controls indentation/styling.
+ */
 function CustomQueryGroup({ group, path = [], depth = 0, onChange }) {
   const rules = group.rules || [];
 
@@ -227,6 +255,11 @@ function CustomQueryGroup({ group, path = [], depth = 0, onChange }) {
   );
 }
 
+/*
+ * Modal for creating saved queries.
+ * Template-driven queries render regular form fields; the custom template uses
+ * CustomQueryGroup to build a nested boolean rule tree.
+ */
 function NewQueryModal({ isOpen, onClose, onSubmit, templates = DEFAULT_TEMPLATES, projects = [], selectedItem, }) {
   const [selectedTemplateId, setSelectedTemplateId] = useState(templates[0]?.id || "");
   const selectedTemplate = useMemo(
