@@ -7,7 +7,7 @@ import { CSS } from "@dnd-kit/utilities";
  * column supplies the display label/key; containerId tells dnd-kit whether the
  * item currently lives in the available or visible column list.
  */
-function LayoutColumnItem({ column, containerId }) {
+function LayoutColumnItem({ column, containerId, width }) {
   const {
     attributes,
     listeners,
@@ -51,6 +51,7 @@ function LayoutColumnItem({ column, containerId }) {
       <div className="layout-column-content">
         <span className="layout-column-label">{column.label}</span>
         <span className="layout-column-key">{column.key}</span>
+        {width && <span className="layout-column-width">{Math.round(width)}px wide</span>}
       </div>
     </div>
   );

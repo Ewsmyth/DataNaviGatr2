@@ -699,13 +699,24 @@ def create_table_layout():
     normalized_columns = []
     seen = set()
     for value in columns:
-        if not isinstance(value, str):
-            return jsonify({"error": "Layout columns must be strings."}), 400
-        key = value.strip()
+        width = None
+        if isinstance(value, dict):
+            key = str(value.get("key") or "").strip()
+            raw_width = value.get("width")
+            if isinstance(raw_width, (int, float)):
+                width = max(80, min(800, int(raw_width)))
+        elif isinstance(value, str):
+            key = value.strip()
+        else:
+            return jsonify({"error": "Layout columns must be strings or column objects."}), 400
+
         if not key or key in seen:
             continue
         seen.add(key)
-        normalized_columns.append(key)
+        if width:
+            normalized_columns.append({"key": key, "width": width})
+        else:
+            normalized_columns.append(key)
 
     if not normalized_columns:
         return jsonify({"error": "At least one valid visible column is required."}), 400

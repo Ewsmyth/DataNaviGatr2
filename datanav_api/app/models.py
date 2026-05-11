@@ -315,9 +315,25 @@ class TableLayout(db.Model):
 
     def to_dict(self):
         """Serialize a saved table layout for QueryTable."""
+        columns = []
+        column_widths = {}
+
+        for item in self.columns_json or []:
+            if isinstance(item, dict):
+                key = str(item.get("key") or "").strip()
+                if not key:
+                    continue
+                columns.append(key)
+                width = item.get("width")
+                if isinstance(width, (int, float)):
+                    column_widths[key] = width
+            else:
+                columns.append(str(item))
+
         return {
             "id": self.id,
             "name": self.name,
-            "columns": self.columns_json or [],
+            "columns": columns,
+            "columnWidths": column_widths,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

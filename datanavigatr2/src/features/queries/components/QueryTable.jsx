@@ -11,8 +11,11 @@ import {
 import {
   SortableContext,
   arrayMove,
+  horizontalListSortingStrategy,
   verticalListSortingStrategy,
+  useSortable,
 } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import LayoutColumnItem from "./queryTable/LayoutColumnItem";
 import LayoutDropZone from "./queryTable/LayoutDropZone";
 import { DEFAULT_COLUMNS } from "../data/queryTableColumns";
@@ -38,6 +41,139 @@ import {
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL ?? "";
 const AVAILABLE_CONTAINER_ID = "available-columns";
 const VISIBLE_CONTAINER_ID = "visible-columns";
+const DEFAULT_COLUMN_WIDTH = 180;
+const MIN_COLUMN_WIDTH = 96;
+const MAX_COLUMN_WIDTH = 640;
+const GROUP_TOGGLE_COLUMN_WIDTH = 52;
+
+function QueryHeaderCell({
+  column,
+  width,
+  isGrouped,
+  hasFilter,
+  activeColumnMenu,
+  columnMenuRef,
+  onSort,
+  getSortIndicator,
+  onToggleColumnMenu,
+  onOpenFilterModal,
+  onToggleGroupColumn,
+  onOpenSarnegModal,
+  onResizeStart,
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: column.key,
+    data: {
+      type: "table-column",
+    },
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    width,
+  };
+
+  return (
+    <th
+      ref={setNodeRef}
+      style={style}
+      className={[
+        isGrouped ? "grouped-column-header" : "",
+        isDragging ? "query-column-dragging" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <div className="header-cell">
+        <button
+          type="button"
+          className="column-drag-handle"
+          aria-label={`Move ${column.label} column`}
+          {...attributes}
+          {...listeners}
+        >
+          ☰
+        </button>
+
+        <button
+          type="button"
+          className="sortable-header-button"
+          onClick={() => onSort(column.key)}
+        >
+          <span>{column.label}</span>
+          <span className="sort-indicator">
+            {getSortIndicator(column.key)}
+          </span>
+        </button>
+
+        <div
+          className="header-filter-wrap"
+          ref={activeColumnMenu === column.key ? columnMenuRef : null}
+        >
+          <button
+            type="button"
+            className={`filter-header-button ${
+              hasFilter || isGrouped ? "filter-header-button-active" : ""
+            }`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleColumnMenu(column.key);
+            }}
+            aria-label={`Column options for ${column.label}`}
+          >
+            ⋯
+          </button>
+
+          {activeColumnMenu === column.key && (
+            <div
+              className="column-menu-popup"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="column-menu-item"
+                onClick={() => onOpenFilterModal(column.key)}
+              >
+                Filter
+              </button>
+              <button
+                type="button"
+                className={`column-menu-item ${
+                  isGrouped ? "column-menu-item-active" : ""
+                }`}
+                onClick={() => onToggleGroupColumn(column.key)}
+              >
+                Group
+              </button>
+              <button
+                type="button"
+                className="column-menu-item"
+                onClick={() => onOpenSarnegModal(column.key)}
+              >
+                SARNEG
+              </button>
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          className="column-resize-handle"
+          onPointerDown={(event) => onResizeStart(column.key, event)}
+          aria-label={`Resize ${column.label} column`}
+        />
+      </div>
+    </th>
+  );
+}
 
 /*
  * Main saved-query result table.
@@ -99,6 +235,7 @@ function QueryTable({ query, accessToken, loadingProgress }) {
   const [visibleColumnKeys, setVisibleColumnKeys] = useState(
     DEFAULT_COLUMNS.map((column) => column.key)
   );
+  const [columnWidths, setColumnWidths] = useState({});
   const [filters, setFilters] = useState(() => createDefaultFilterState(DEFAULT_COLUMNS));
   const [sortConfigs, setSortConfigs] = useState([{
     key: DEFAULT_COLUMNS[0]?.key || "_id",
@@ -135,6 +272,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     })
   );
 
+  function getColumnWidth(columnKey) {
+    return columnWidths[columnKey] || DEFAULT_COLUMN_WIDTH;
+  }
+
   /*
    * When a new query has different fields, keep any visible columns that still
    * exist and fall back to the default set if nothing survives.
@@ -151,6 +292,21 @@ function QueryTable({ query, accessToken, loadingProgress }) {
       return DEFAULT_COLUMNS.map((column) => column.key).filter((key) =>
         existingKeys.has(key)
       );
+    });
+  }, [derivedColumns]);
+
+  useEffect(() => {
+    setColumnWidths((current) => {
+      const availableKeys = new Set(derivedColumns.map((column) => column.key));
+      const next = {};
+
+      Object.entries(current).forEach(([key, width]) => {
+        if (availableKeys.has(key)) {
+          next[key] = width;
+        }
+      });
+
+      return next;
     });
   }, [derivedColumns]);
 
@@ -465,6 +621,14 @@ function QueryTable({ query, accessToken, loadingProgress }) {
   const displayedResultCount =
     groupedColumnKeys.length > 0 ? groupedRows.length : sortedRows.length;
 
+  const tableMinWidth = useMemo(() => {
+    const visibleWidth = visibleColumnKeys.reduce(
+      (total, key) => total + getColumnWidth(key),
+      0
+    );
+    return visibleWidth + (groupedColumnKeys.length > 0 ? GROUP_TOGGLE_COLUMN_WIDTH : 0);
+  }, [columnWidths, groupedColumnKeys.length, visibleColumnKeys]);
+
   const activeFilterCount = derivedColumns.filter((column) =>
     hasActiveFilter(column.key)
   ).length;
@@ -725,6 +889,57 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     }
   }
 
+  function handleTableColumnDragEnd(event) {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    setVisibleColumnKeys((current) => {
+      const oldIndex = current.indexOf(active.id);
+      const newIndex = current.indexOf(over.id);
+
+      if (oldIndex === -1 || newIndex === -1) {
+        return current;
+      }
+
+      setSelectedLayoutId("");
+      setLayoutMessage("Column order changed. Save a layout to keep this arrangement.");
+      return arrayMove(current, oldIndex, newIndex);
+    });
+  }
+
+  function handleColumnResizeStart(columnKey, event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startWidth = getColumnWidth(columnKey);
+
+    function handlePointerMove(moveEvent) {
+      const nextWidth = Math.min(
+        MAX_COLUMN_WIDTH,
+        Math.max(MIN_COLUMN_WIDTH, startWidth + moveEvent.clientX - startX)
+      );
+
+      setColumnWidths((current) => ({
+        ...current,
+        [columnKey]: nextWidth,
+      }));
+    }
+
+    function handlePointerUp() {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      setSelectedLayoutId("");
+      setLayoutMessage("Column width changed for this table. Save the layout order when ready.");
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+  }
+
   /*
    * Applies saved layout columns after removing duplicates and columns that are
    * not available for the currently opened query.
@@ -750,6 +965,26 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     setLayoutMessage(
       `Applied layout with ${normalizedKeys.length} visible column${normalizedKeys.length === 1 ? "" : "s"}.`
     );
+  }
+
+  function applyLayoutWidths(widthsByColumn) {
+    if (!widthsByColumn || typeof widthsByColumn !== "object") {
+      return;
+    }
+
+    setColumnWidths((current) => {
+      const next = { ...current };
+      Object.entries(widthsByColumn).forEach(([key, width]) => {
+        if (!columnMap.has(key)) return;
+        const numericWidth = Number(width);
+        if (!Number.isFinite(numericWidth)) return;
+        next[key] = Math.min(
+          MAX_COLUMN_WIDTH,
+          Math.max(MIN_COLUMN_WIDTH, numericWidth)
+        );
+      });
+      return next;
+    });
   }
 
   /*
@@ -779,7 +1014,10 @@ function QueryTable({ query, accessToken, loadingProgress }) {
         },
         body: JSON.stringify({
           name: trimmedName,
-          columns: visibleColumnKeys,
+          columns: visibleColumnKeys.map((key) => ({
+            key,
+            width: getColumnWidth(key),
+          })),
         }),
       });
 
@@ -815,6 +1053,7 @@ function QueryTable({ query, accessToken, loadingProgress }) {
     }
 
     applyLayoutColumns(layout.columns || []);
+    applyLayoutWidths(layout.columnWidths || {});
   }
 
   /*
@@ -1012,6 +1251,7 @@ function QueryTable({ query, accessToken, loadingProgress }) {
                             key={column.key}
                             column={column}
                             containerId={AVAILABLE_CONTAINER_ID}
+                            width={columnWidths[column.key]}
                           />
                         ))}
                       </LayoutDropZone>
@@ -1033,6 +1273,7 @@ function QueryTable({ query, accessToken, loadingProgress }) {
                             key={column.key}
                             column={column}
                             containerId={VISIBLE_CONTAINER_ID}
+                            width={getColumnWidth(column.key)}
                           />
                         ))}
                       </LayoutDropZone>
@@ -1129,86 +1370,53 @@ function QueryTable({ query, accessToken, loadingProgress }) {
       </div>
 
       <div className="query-table-scroll">
-        <table className="query-results-table">
+        <table
+          className="query-results-table"
+          style={{ minWidth: `${tableMinWidth}px` }}
+        >
+          <colgroup>
+            {groupedColumnKeys.length > 0 && (
+              <col style={{ width: `${GROUP_TOGGLE_COLUMN_WIDTH}px` }} />
+            )}
+            {visibleColumns.map((column) => (
+              <col key={column.key} style={{ width: `${getColumnWidth(column.key)}px` }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
               {groupedColumnKeys.length > 0 && (
                 <th className="group-toggle-header" aria-label="Grouped rows" />
               )}
 
-              {visibleColumns.map((column) => (
-                <th
-                  key={column.key}
-                  className={groupedColumnKeys.includes(column.key) ? "grouped-column-header" : ""}
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleTableColumnDragEnd}
+              >
+                <SortableContext
+                  items={visibleColumnKeys}
+                  strategy={horizontalListSortingStrategy}
                 >
-                  <div className="header-cell">
-                    <button
-                      type="button"
-                      className="sortable-header-button"
-                      onClick={() => handleSort(column.key)}
-                    >
-                      <span>{column.label}</span>
-                      <span className="sort-indicator">
-                        {getSortIndicator(column.key)}
-                      </span>
-                    </button>
-
-                    <div
-                      className="header-filter-wrap"
-                      ref={activeColumnMenu === column.key ? columnMenuRef : null}
-                    >
-                      <button
-                        type="button"
-                        className={`filter-header-button ${
-                          hasActiveFilter(column.key) || groupedColumnKeys.includes(column.key)
-                            ? "filter-header-button-active"
-                            : ""
-                        }`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleColumnMenu(column.key);
-                        }}
-                        aria-label={`Column options for ${column.label}`}
-                      >
-                        ⋯
-                      </button>
-
-                      {activeColumnMenu === column.key && (
-                        <div
-                          className="column-menu-popup"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            className="column-menu-item"
-                            onClick={() => openFilterModal(column.key)}
-                          >
-                            Filter
-                          </button>
-                          <button
-                            type="button"
-                            className={`column-menu-item ${
-                              groupedColumnKeys.includes(column.key)
-                                ? "column-menu-item-active"
-                                : ""
-                            }`}
-                            onClick={() => toggleGroupColumn(column.key)}
-                          >
-                            Group
-                          </button>
-                          <button
-                            type="button"
-                            className="column-menu-item"
-                            onClick={() => openSarnegModal(column.key)}
-                          >
-                            SARNEG
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </th>
-              ))}
+                  {visibleColumns.map((column) => (
+                    <QueryHeaderCell
+                      key={column.key}
+                      column={column}
+                      width={getColumnWidth(column.key)}
+                      isGrouped={groupedColumnKeys.includes(column.key)}
+                      hasFilter={hasActiveFilter(column.key)}
+                      activeColumnMenu={activeColumnMenu}
+                      columnMenuRef={columnMenuRef}
+                      onSort={handleSort}
+                      getSortIndicator={getSortIndicator}
+                      onToggleColumnMenu={toggleColumnMenu}
+                      onOpenFilterModal={openFilterModal}
+                      onToggleGroupColumn={toggleGroupColumn}
+                      onOpenSarnegModal={openSarnegModal}
+                      onResizeStart={handleColumnResizeStart}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
             </tr>
           </thead>
 
