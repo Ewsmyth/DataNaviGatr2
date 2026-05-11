@@ -679,6 +679,55 @@ function QueryWorkspacePage() {
     }
   }
 
+  async function handleDeleteQuery(queryId) {
+    try {
+      const queryToDelete =
+        selectedProject?.queries?.find((query) => query.id === queryId) ||
+        selectedProject?.folders
+          ?.flatMap((folder) => folder.queries || [])
+          .find((query) => query.id === queryId);
+
+      if (!queryToDelete) return;
+
+      const confirmed = window.confirm(`Delete saved query "${queryToDelete.name}"?`);
+      if (!confirmed) return;
+
+      const response = await fetch(`${API_BASE_URL}/api/queries/${queryId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to delete query.");
+      }
+
+      setProjects((prevProjects) =>
+        prevProjects.map((project) => ({
+          ...project,
+          queries: (project.queries || []).filter((query) => query.id !== queryId),
+          folders: (project.folders || []).map((folder) => ({
+            ...folder,
+            queries: (folder.queries || []).filter((query) => query.id !== queryId),
+          })),
+        }))
+      );
+
+      if (selectedQuery?.id === queryId) {
+        setSelectedQuery(null);
+        queryResultsAbortRef.current?.abort();
+        queryResultsAbortRef.current = null;
+      }
+
+      setGlobalMessage(data.message || "Query deleted successfully.");
+    } catch (error) {
+      setGlobalMessage(error.message || "Failed to delete query.");
+    }
+  }
+
   /*
    * Opens the query modal only when the user is authenticated and has permission
    * to create/run queries.
@@ -818,6 +867,7 @@ function QueryWorkspacePage() {
           setSelectedItem={setSelectedItem}
           setSelectedQuery={setSelectedQuery}
           onOpenQuery={handleOpenQuery}
+          onDeleteQuery={handleDeleteQuery}
           isAuthenticated={isAuthenticated}
           hasUserRole={hasUserRole}
           isDataLoading={isDataLoading}

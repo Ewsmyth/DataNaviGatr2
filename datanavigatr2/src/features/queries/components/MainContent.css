@@ -90,24 +90,51 @@
 }
 
 .query-card {
+    position: relative;
     border: 1px solid var(--border);
     border-radius: 16px;
     background: rgba(255, 255, 255, 0.02);
-    padding: 18px;
+    padding: 0;
     transition: border-color 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
 }
 
 .query-card-button {
     width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 18px 54px 18px 18px;
     text-align: left;
     cursor: pointer;
     color: inherit;
+    font: inherit;
 }
 
-.query-card-button:hover {
+.query-card:hover {
     transform: translateY(-1px);
     border-color: var(--accent);
     background: var(--bg-soft);
+}
+
+.query-delete-button {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 1.25rem;
+    line-height: 1;
+    transition: border-color 0.2s ease, color 0.2s ease, background-color 0.2s ease;
+}
+
+.query-delete-button:hover {
+    border-color: var(--danger);
+    background: rgba(248, 113, 113, 0.12);
+    color: var(--danger);
 }
 
 .query-card-top {

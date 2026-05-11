@@ -16,6 +16,7 @@ function MainContent({
   setSelectedItem,
   setSelectedQuery,
   onOpenQuery,
+  onDeleteQuery,
   isAuthenticated,
   hasUserRole,
   isDataLoading,
@@ -169,28 +170,42 @@ function MainContent({
           {mainContent.queries.length > 0 ? (
             <div className="query-list">
               {mainContent.queries.map((query) => (
-                <button
-                  className="query-card query-card-button"
+                <article
+                  className="query-card"
                   key={query.id}
-                  type="button"
-                  onClick={() => onOpenQuery(query.id)}
                 >
-                  <div className="query-card-top">
-                    <h3>{query.name}</h3>
-                    <span className="query-results-pill">
-                      {query.resultCount} results
-                    </span>
-                  </div>
+                  <button
+                    className="query-card-button"
+                    type="button"
+                    onClick={() => onOpenQuery(query.id)}
+                  >
+                    <div className="query-card-top">
+                      <h3>{query.name}</h3>
+                      <span className="query-results-pill">
+                        {query.resultCount} results
+                      </span>
+                    </div>
 
-                  <div className="query-meta-row">
-                    <span>
-                      <strong>Creator:</strong> {query.creator}
-                    </span>
-                    <span>
-                      <strong>Created:</strong> {query.createdAt}
-                    </span>
-                  </div>
-                </button>
+                    <div className="query-meta-row">
+                      <span>
+                        <strong>Creator:</strong> {query.creator}
+                      </span>
+                      <span>
+                        <strong>Created:</strong> {query.createdAt}
+                      </span>
+                    </div>
+                  </button>
+
+                  <button
+                    className="query-delete-button"
+                    type="button"
+                    onClick={() => onDeleteQuery(query.id)}
+                    aria-label={`Delete saved query ${query.name}`}
+                    title="Delete query"
+                  >
+                    ×
+                  </button>
+                </article>
               ))}
             </div>
           ) : (

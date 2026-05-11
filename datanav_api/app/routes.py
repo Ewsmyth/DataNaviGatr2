@@ -572,6 +572,46 @@ def get_saved_query(query_id):
     }), 200
 
 
+@api_bp.route("/api/queries/<query_id>", methods=["DELETE"])
+@token_required
+@require_role("user")
+def delete_saved_query(query_id):
+    """Delete one saved query, its saved results, and linked audit rows."""
+    saved_query = (
+        SavedQuery.query
+        .join(Project, SavedQuery.project_id == Project.id)
+        .filter(
+            SavedQuery.id == query_id,
+            Project.owner_id == g.current_user.id
+        )
+        .first()
+    )
+
+    if not saved_query:
+        return jsonify({"error": "Query not found."}), 404
+
+    project_id = saved_query.project_id
+    folder_id = saved_query.folder_id
+
+    try:
+        deleted_query_runs = _delete_query_runs_for_saved_queries([saved_query.id])
+        db.session.delete(saved_query)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"error": f"Failed to delete query: {str(exc)}"}), 500
+
+    return jsonify({
+        "message": "Query deleted successfully.",
+        "deleted": {
+            "queryId": query_id,
+            "projectId": project_id,
+            "folderId": folder_id,
+            "queryRunCount": deleted_query_runs,
+        },
+    }), 200
+
+
 @api_bp.route("/api/queries/<query_id>/results", methods=["GET"])
 @token_required
 @require_role("user")
