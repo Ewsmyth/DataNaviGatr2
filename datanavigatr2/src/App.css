@@ -379,14 +379,45 @@ body {
   margin-bottom: 12px;
 }
 
+.dataview-chart-controls {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+}
+
+.dataview-chart-controls label,
+.dataview-scroll-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.dataview-chart-controls select {
+  min-width: 128px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 9px 10px;
+  font: inherit;
+  text-transform: none;
+}
+
 .dataview-chart-wrap {
-  overflow-x: auto;
+  overflow: visible;
+}
+
+.dataview-chart-stage {
+  position: relative;
 }
 
 .dataview-chart {
   display: block;
   width: 100%;
-  min-width: 640px;
   height: auto;
 }
 
@@ -403,10 +434,42 @@ body {
   stroke-linejoin: round;
 }
 
+.dataview-hover-line {
+  stroke: var(--muted);
+  stroke-dasharray: 5 7;
+  stroke-width: 2;
+}
+
 .dataview-point {
   fill: var(--accent-2);
   stroke: var(--text);
   stroke-width: 1.5;
+}
+
+.dataview-tooltip {
+  position: absolute;
+  z-index: 2;
+  min-width: 152px;
+  transform: translate(-50%, -100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(14, 20, 33, 0.96);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  padding: 9px 10px;
+  pointer-events: none;
+}
+
+.dataview-tooltip strong,
+.dataview-tooltip span {
+  display: block;
+}
+
+.dataview-tooltip span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .dataview-chart-labels,
@@ -420,6 +483,15 @@ body {
   color: var(--muted);
   font-size: 0.82rem;
   font-weight: 700;
+}
+
+.dataview-scroll-control {
+  margin-top: 12px;
+}
+
+.dataview-scroll-control input {
+  width: 100%;
+  accent-color: var(--accent);
 }
 
 .dataview-list {
@@ -449,7 +521,9 @@ body {
   }
 
   .dataview-header,
-  .dataview-actions {
+  .dataview-actions,
+  .dataview-panel-heading,
+  .dataview-chart-controls {
     align-items: stretch;
     flex-direction: column;
   }

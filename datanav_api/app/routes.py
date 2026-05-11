@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from collections import Counter
 
 from flask import Blueprint, current_app, g, jsonify, request
@@ -867,12 +867,77 @@ def _parse_record_day(raw_value):
         return text[:10] if len(text) >= 10 else "Unknown"
 
 
+def _parse_ingest_datetime(raw_value):
+    """Parse an ingest timestamp into an aware UTC datetime."""
+    if not raw_value:
+        return None
+
+    value = raw_value
+    if isinstance(value, dict):
+        value = value.get("$date") or value.get("date")
+
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _iso_utc(value):
+    """Format datetimes like the ingest service stores them."""
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _floor_datetime(value, unit, bin_size):
+    """Floor a UTC datetime to the chart bucket boundary."""
+    value = value.astimezone(timezone.utc).replace(microsecond=0)
+    if unit == "minute":
+        minute = (value.minute // bin_size) * bin_size
+        return value.replace(minute=minute, second=0)
+    if unit == "hour":
+        hour = (value.hour // bin_size) * bin_size
+        return value.replace(hour=hour, minute=0, second=0)
+    if unit == "day":
+        return value.replace(hour=0, minute=0, second=0)
+    if unit == "month":
+        month_index = ((value.month - 1) // bin_size) * bin_size + 1
+        return value.replace(month=month_index, day=1, hour=0, minute=0, second=0)
+    return value.replace(hour=0, minute=0, second=0)
+
+
+def _add_bucket(value, unit, bin_size):
+    """Advance a UTC datetime by one chart bucket."""
+    if unit == "minute":
+        return value + timedelta(minutes=bin_size)
+    if unit == "hour":
+        return value + timedelta(hours=bin_size)
+    if unit == "day":
+        return value + timedelta(days=bin_size)
+    if unit == "month":
+        month = value.month - 1 + bin_size
+        year = value.year + month // 12
+        month = month % 12 + 1
+        return value.replace(year=year, month=month)
+    return value + timedelta(days=bin_size)
+
+
 def _first_present(*values):
     """Return the first non-empty value or Unknown for metric bucketing."""
     for value in values:
         if value not in [None, ""]:
             return value
     return "Unknown"
+
+
+def _ensure_dataview_indexes(collection):
+    """Keep DataView range queries on ingest time from scanning the full collection."""
+    collection.create_index("_ingest.ingested_at", background=True)
 
 
 @api_bp.route("/api/dataview/metrics", methods=["GET"])
@@ -884,19 +949,27 @@ def dataview_metrics():
 
     db_mongo = get_mongo_db()
     collection = db_mongo["records"]
+    _ensure_dataview_indexes(collection)
 
     total_records = collection.estimated_document_count()
-    time_buckets = Counter()
     org_counts = Counter()
     collector_counts = Counter()
     signal_counts = Counter()
+    earliest_record = collection.find_one(
+        {"_ingest.ingested_at": {"$exists": True, "$ne": ""}},
+        {"_id": 0, "_ingest.ingested_at": 1},
+        sort=[("_ingest.ingested_at", 1)],
+    )
+    latest_record = collection.find_one(
+        {"_ingest.ingested_at": {"$exists": True, "$ne": ""}},
+        {"_id": 0, "_ingest.ingested_at": 1},
+        sort=[("_ingest.ingested_at", -1)],
+    )
 
     cursor = collection.find(
         {},
         {
             "_id": 0,
-            "start_time": 1,
-            "normalized.start_time": 1,
             "signal_type": 1,
             "normalized.signal_type": 1,
             "_ingest.organization_code": 1,
@@ -908,7 +981,6 @@ def dataview_metrics():
         normalized = record.get("normalized") if isinstance(record.get("normalized"), dict) else {}
         ingest = record.get("_ingest") if isinstance(record.get("_ingest"), dict) else {}
 
-        time_buckets[_parse_record_day(_first_present(normalized.get("start_time"), record.get("start_time")))] += 1
         org_counts[str(_first_present(ingest.get("organization_code")))] += 1
         collector_counts[str(_first_present(ingest.get("collector_code")))] += 1
         signal_counts[str(_first_present(normalized.get("signal_type"), record.get("signal_type")))] += 1
@@ -920,15 +992,119 @@ def dataview_metrics():
             for label, count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
         ]
 
+    earliest_ingested_at = (earliest_record or {}).get("_ingest", {}).get("ingested_at")
+    latest_ingested_at = (latest_record or {}).get("_ingest", {}).get("ingested_at")
+
     return jsonify({
         "totalRecords": total_records,
-        "recordsOverTime": [
-            {"date": label, "count": count}
-            for label, count in sorted(time_buckets.items())
-        ],
+        "timelineBounds": {
+            "earliestIngestedAt": earliest_ingested_at,
+            "latestIngestedAt": latest_ingested_at,
+        },
         "recordsByOrgCode": counter_items(org_counts),
         "recordsByCollectorCode": counter_items(collector_counts),
         "recordsBySignalType": counter_items(signal_counts),
+    }), 200
+
+
+@api_bp.route("/api/dataview/records-over-time", methods=["GET"])
+@token_required
+@require_role("admin")
+def dataview_records_over_time():
+    """Return bounded record-count buckets by ingest time for the DataView chart."""
+    from .mongo import get_mongo_db
+
+    db_mongo = get_mongo_db()
+    collection = db_mongo["records"]
+    _ensure_dataview_indexes(collection)
+
+    start_at = _parse_ingest_datetime(request.args.get("start"))
+    end_at = _parse_ingest_datetime(request.args.get("end"))
+    if not start_at or not end_at:
+        return jsonify({"error": "Start and end ingest timestamps are required."}), 400
+    if start_at >= end_at:
+        return jsonify({"error": "Start must be before end."}), 400
+    if end_at - start_at > timedelta(days=370):
+        return jsonify({"error": "DataView chart windows are limited to 370 days."}), 400
+
+    window_seconds = (end_at - start_at).total_seconds()
+    if window_seconds <= 3 * 60 * 60:
+        unit, bin_size = "minute", 5
+    elif window_seconds <= 36 * 60 * 60:
+        unit, bin_size = "hour", 1
+    elif window_seconds <= 4 * 24 * 60 * 60:
+        unit, bin_size = "hour", 2
+    elif window_seconds <= 10 * 24 * 60 * 60:
+        unit, bin_size = "hour", 12
+    elif window_seconds <= 45 * 24 * 60 * 60:
+        unit, bin_size = "day", 1
+    else:
+        unit, bin_size = "month", 1
+
+    pipeline = [
+        {
+            "$match": {
+                "_ingest.ingested_at": {
+                    "$gte": _iso_utc(start_at),
+                    "$lt": _iso_utc(end_at),
+                }
+            }
+        },
+        {
+            "$project": {
+                "ingestedAt": {
+                    "$dateFromString": {
+                        "dateString": "$_ingest.ingested_at",
+                        "onError": None,
+                        "onNull": None,
+                    }
+                }
+            }
+        },
+        {"$match": {"ingestedAt": {"$ne": None}}},
+        {
+            "$group": {
+                "_id": {
+                    "$dateTrunc": {
+                        "date": "$ingestedAt",
+                        "unit": unit,
+                        "binSize": bin_size,
+                        "timezone": "UTC",
+                    }
+                },
+                "count": {"$sum": 1},
+            }
+        },
+        {"$sort": {"_id": 1}},
+    ]
+
+    aggregate_counts = {
+        _iso_utc(item["_id"]): item["count"]
+        for item in collection.aggregate(pipeline, allowDiskUse=False)
+        if item.get("_id")
+    }
+
+    records_over_time = []
+    bucket_at = _floor_datetime(start_at, unit, bin_size)
+    while bucket_at < end_at:
+        bucket_end = _add_bucket(bucket_at, unit, bin_size)
+        bucket_key = _iso_utc(bucket_at)
+        records_over_time.append({
+            "date": bucket_at.isoformat(timespec="minutes").replace("+00:00", "Z"),
+            "bucketStart": bucket_key,
+            "bucketEnd": _iso_utc(bucket_end),
+            "count": aggregate_counts.get(bucket_key, 0),
+        })
+        bucket_at = bucket_end
+
+    return jsonify({
+        "recordsOverTime": records_over_time,
+        "window": {
+            "start": _iso_utc(start_at),
+            "end": _iso_utc(end_at),
+            "bucketUnit": unit,
+            "bucketSize": bin_size,
+        },
     }), 200
 
 
