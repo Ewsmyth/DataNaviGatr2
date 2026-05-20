@@ -15,6 +15,14 @@ from flask import Flask, jsonify, request
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from werkzeug.utils import secure_filename
+from scripts.cellular_survey_tower_parser import (
+    build_tower_document,
+    canonical_from_doc,
+    ensure_indexes,
+    estimate_tower,
+    observation_from_doc,
+    tower_id as build_tower_id,
+)
 
 """
 Standalone ingest API.
@@ -33,6 +41,7 @@ MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "ingestion_db")
 MONGO_COLLECTION_NAME = os.getenv("MONGO_COLLECTION_NAME", "records")
 CELL_SURVEY_DB_NAME = os.getenv("CELL_SURVEY_DB_NAME", "cell_survey")
 CELL_SURVEY_COLLECTION_NAME = os.getenv("CELL_SURVEY_COLLECTION_NAME", "records")
+CELL_TOWERS_COLLECTION_NAME = os.getenv("CELL_TOWERS_COLLECTION_NAME", "towers")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "120"))
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "100"))
@@ -47,6 +56,7 @@ mongo_db = mongo_client[MONGO_DB_NAME]
 mongo_collection = mongo_db[MONGO_COLLECTION_NAME]
 cell_survey_db = mongo_client[CELL_SURVEY_DB_NAME]
 cell_survey_collection = cell_survey_db[CELL_SURVEY_COLLECTION_NAME]
+cell_towers_collection = cell_survey_db[CELL_TOWERS_COLLECTION_NAME]
 
 
 def _get_bearer_token():
@@ -937,6 +947,73 @@ def insert_documents(documents, collection=None):
     return inserted_count
 
 
+def get_survey_tower_id(doc):
+    """Return the canonical full-GCI tower id for one survey document."""
+    parts = canonical_from_doc(doc)
+    return build_tower_id(parts) if parts else None
+
+
+def refine_survey_towers(tower_ids, min_observations=3, grid_size=61):
+    """
+    Recompute tower estimates for affected GCIs from all accumulated survey data.
+
+    This keeps cell_survey.towers long-lived and continuously refined as new
+    routes/survey files are ingested.
+    """
+    target_tower_ids = {tower_id for tower_id in tower_ids if tower_id}
+    if not target_tower_ids:
+        return {"updated": 0, "skipped": 0}
+
+    ensure_indexes(cell_survey_collection, cell_towers_collection)
+    grouped = {tower_id: [] for tower_id in target_tower_ids}
+    cursor = cell_survey_collection.find(
+        {
+            "record_type": "cellular_survey",
+            "collection_location.latitude": {"$exists": True},
+            "collection_location.longitude": {"$exists": True},
+        }
+    )
+
+    for doc in cursor:
+        observation = observation_from_doc(doc)
+        if not observation:
+            continue
+
+        current_tower_id = build_tower_id(
+            (
+                observation.protocol,
+                observation.mcc,
+                observation.mnc,
+                observation.area,
+                observation.cell,
+                observation.channel,
+            )
+        )
+        if current_tower_id in grouped:
+            grouped[current_tower_id].append(observation)
+
+    updated = 0
+    skipped = 0
+    for tower_id, observations in grouped.items():
+        if len(observations) < min_observations:
+            skipped += 1
+            continue
+
+        estimate = estimate_tower(observations, grid_size)
+        tower_doc = build_tower_document(tower_id, observations, estimate)
+        cell_towers_collection.update_one(
+            {"tower_id": tower_id},
+            {
+                "$set": tower_doc,
+                "$setOnInsert": {"created_at": tower_doc["updated_at"]},
+            },
+            upsert=True,
+        )
+        updated += 1
+
+    return {"updated": updated, "skipped": skipped}
+
+
 @app.get("/")
 def service_info():
     """Small root endpoint describing the ingest service."""
@@ -969,6 +1046,7 @@ def health():
         "collection": MONGO_COLLECTION_NAME,
         "cell_survey_database": CELL_SURVEY_DB_NAME,
         "cell_survey_collection": CELL_SURVEY_COLLECTION_NAME,
+        "cell_towers_collection": CELL_TOWERS_COLLECTION_NAME,
     }), 200
 
 
@@ -1042,6 +1120,9 @@ def upload_files():
                 )
             elif file_type == "cellular_survey":
                 documents = parse_cellular_survey(text, final_filename)
+                affected_tower_ids = {
+                    get_survey_tower_id(document) for document in documents
+                }
                 target_database = CELL_SURVEY_DB_NAME
                 target_collection = CELL_SURVEY_COLLECTION_NAME
                 inserted_count = insert_documents(
@@ -1053,10 +1134,11 @@ def upload_files():
                     ),
                     collection=cell_survey_collection,
                 )
+                tower_refinement = refine_survey_towers(affected_tower_ids)
             else:
                 raise ValueError("Unrecognized file type.")
 
-            results.append({
+            result_payload = {
                 "original_name": original_name,
                 "final_filename": final_filename,
                 "recognized_file_type": file_type,
@@ -1064,7 +1146,11 @@ def upload_files():
                 "collection": target_collection,
                 "status": "success",
                 "inserted_count": inserted_count,
-            })
+            }
+            if file_type == "cellular_survey":
+                result_payload["tower_refinement"] = tower_refinement
+
+            results.append(result_payload)
 
         except UnicodeDecodeError:
             results.append({
