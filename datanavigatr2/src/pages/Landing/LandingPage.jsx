@@ -57,6 +57,15 @@ function LandingPage() {
             Portainer
           </a>
 
+          <Link
+            to="/balancedcage"
+            target="_blank"
+            rel="noreferrer"
+            className="landing-button"
+          >
+            BalancedCage
+          </Link>
+
         </div>
       </div>
     </main>
