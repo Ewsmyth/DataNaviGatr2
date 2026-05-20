@@ -3,6 +3,8 @@ import math
 import os
 import re
 import hashlib
+import csv
+from io import StringIO
 from functools import wraps
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +31,8 @@ UPLOAD_TMP_DIR = os.getenv("UPLOAD_TMP_DIR", "/tmp/ingest_uploads")
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin:password@mongodb:27017/?authSource=admin")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "ingestion_db")
 MONGO_COLLECTION_NAME = os.getenv("MONGO_COLLECTION_NAME", "records")
+CELL_SURVEY_DB_NAME = os.getenv("CELL_SURVEY_DB_NAME", "cell_survey")
+CELL_SURVEY_COLLECTION_NAME = os.getenv("CELL_SURVEY_COLLECTION_NAME", "records")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "120"))
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "100"))
@@ -41,6 +45,8 @@ os.makedirs(UPLOAD_TMP_DIR, exist_ok=True)
 mongo_client = MongoClient(MONGO_URI)
 mongo_db = mongo_client[MONGO_DB_NAME]
 mongo_collection = mongo_db[MONGO_COLLECTION_NAME]
+cell_survey_db = mongo_client[CELL_SURVEY_DB_NAME]
+cell_survey_collection = cell_survey_db[CELL_SURVEY_COLLECTION_NAME]
 
 
 def _get_bearer_token():
@@ -79,8 +85,23 @@ def admin_token_required(fn):
 
 
 def allowed_file(filename: str) -> bool:
-    """Return True when an uploaded filename is a JSON file."""
-    return filename.lower().endswith(".json")
+    """Return True when an uploaded filename maps to a known ingest type."""
+    return recognize_file_type(filename) is not None
+
+
+def get_file_extension(filename: str) -> str:
+    """Return a normalized lowercase file extension, including the leading dot."""
+    return Path(filename or "").suffix.lower()
+
+
+def recognize_file_type(filename: str):
+    """Map known file extensions to ingest domains."""
+    extension = get_file_extension(filename)
+    if extension == ".json":
+        return "cellular_collect"
+    if extension in (".gns", ".g3ns"):
+        return "cellular_survey"
+    return None
 
 
 def validate_collector_code(value: str) -> str:
@@ -534,6 +555,222 @@ def build_source_fingerprint(doc):
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def parse_survey_scalar(value):
+    """Convert simple survey cell values while preserving empty cells as None."""
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if text == "":
+        return None
+
+    if re.fullmatch(r"[-+]?\d+", text):
+        try:
+            return int(text)
+        except ValueError:
+            return text
+
+    if re.fullmatch(r"[-+]?(?:\d+\.\d*|\d*\.\d+)", text):
+        try:
+            return float(text)
+        except ValueError:
+            return text
+
+    return text
+
+
+def parse_survey_metadata_row(row):
+    """Convert one pre-FIELDS metadata row into a key/value pair when possible."""
+    if not row:
+        return None, None
+
+    first = (row[0] or "").strip()
+    if not first:
+        return None, None
+
+    if len(row) > 1:
+        value = ",".join(item for item in row[1:] if item is not None).strip()
+        return first, parse_survey_scalar(value)
+
+    if ":" in first:
+        key, value = first.split(":", 1)
+        return key.strip(), parse_survey_scalar(value)
+
+    return first, True
+
+
+def unique_survey_field_name(field_name, seen_counts):
+    """Return a Mongo-safe field key while preserving duplicate survey columns."""
+    base_name = field_name or "_blank_field"
+    seen_counts[base_name] = seen_counts.get(base_name, 0) + 1
+    if seen_counts[base_name] == 1:
+        return base_name
+    return f"{base_name}__{seen_counts[base_name]}"
+
+
+def build_survey_field_maps(fields, values):
+    """
+    Build complete typed/raw field maps for a REC row.
+
+    Every declared FIELDS column is present in both maps. If a row is short, the
+    missing column is stored as None in the typed map and "" in the raw map. Any
+    duplicate field names receive a __2/__3 suffix so data is not overwritten.
+    """
+    typed_fields = {}
+    raw_fields = {}
+    seen_counts = {}
+
+    for index, field_name in enumerate(fields):
+        field_key = unique_survey_field_name(field_name, seen_counts)
+        raw_value = values[index] if index < len(values) else ""
+        raw_fields[field_key] = raw_value
+        typed_fields[field_key] = parse_survey_scalar(raw_value)
+
+    extra_values = values[len(fields):]
+    if extra_values:
+        raw_fields["_extra_values"] = extra_values
+        typed_fields["_extra_values"] = [
+            parse_survey_scalar(value) for value in extra_values
+        ]
+
+    return typed_fields, raw_fields
+
+
+def parse_cellular_survey(text, source_filename):
+    """
+    Parse .gns/.g3ns cellular survey files.
+
+    The sample files use CSV-like rows with free-form metadata before a FIELDS
+    row and REC rows afterwards. Each REC becomes one Mongo document.
+    """
+    metadata = {}
+    fields = None
+    records = []
+
+    reader = csv.reader(StringIO(text))
+    for line_number, row in enumerate(reader, start=1):
+        if not row or all(not str(item).strip() for item in row):
+            continue
+
+        row_type = (row[0] or "").strip()
+        if row_type == "FIELDS":
+            fields = [field.strip() for field in row[1:]]
+            continue
+
+        if row_type == "REC":
+            if not fields:
+                raise ValueError("Survey file has REC rows before a FIELDS row.")
+
+            values = row[1:]
+            typed_fields, raw_fields = build_survey_field_maps(fields, values)
+
+            records.append(
+                build_cellular_survey_document(
+                    typed_fields=typed_fields,
+                    raw_fields=raw_fields,
+                    declared_fields=fields,
+                    row_values=values,
+                    metadata=metadata,
+                    source_filename=source_filename,
+                    source_line_number=line_number,
+                )
+            )
+            continue
+
+        key, value = parse_survey_metadata_row(row)
+        if key:
+            metadata[key] = value
+
+    if fields is None:
+        raise ValueError("Survey file must include a FIELDS row.")
+
+    return records
+
+
+def build_cellular_survey_document(
+    typed_fields,
+    raw_fields,
+    declared_fields,
+    row_values,
+    metadata,
+    source_filename,
+    source_line_number,
+):
+    """Build one Mongo-ready cellular survey record from a parsed REC row."""
+    latitude = typed_fields.get("LAT")
+    longitude = typed_fields.get("LON")
+    altitude = typed_fields.get("ALT")
+    collection_location = None
+    collection_geo = None
+
+    if isinstance(latitude, (int, float)) and isinstance(longitude, (int, float)):
+        altitude_value = altitude if isinstance(altitude, (int, float)) else 0.0
+        collection_location = {
+            "latitude": float(latitude),
+            "longitude": float(longitude),
+            "altitude": float(altitude_value),
+            "time": typed_fields.get("SYS_DATE_TIME"),
+            "meaning": "collector_system_location",
+            "note": (
+                "This is the collection platform/system location, not the tower, "
+                "phone, subscriber, or emitting-device location."
+            ),
+        }
+        collection_location.update(
+            lat_lon_alt_to_ecef(
+                collection_location["latitude"],
+                collection_location["longitude"],
+                collection_location["altitude"],
+            )
+        )
+        collection_geo = {
+            "type": "Point",
+            "coordinates": [collection_location["longitude"], collection_location["latitude"]],
+        }
+
+    protocol = str(metadata.get("PROTOCOL") or metadata.get("Technology") or "").upper()
+    document = {
+        "record_type": "cellular_survey",
+        "source_format": "cellular_survey_file",
+        "source_filename": source_filename,
+        "source_line_number": source_line_number,
+        "survey_metadata": dict(metadata),
+        "survey_columns": list(declared_fields),
+        "survey_values": [parse_survey_scalar(value) for value in row_values],
+        "survey_raw_values": list(row_values),
+        "survey_fields": typed_fields,
+        "survey_raw_fields": raw_fields,
+        "survey_protocol": protocol or None,
+        "system": metadata.get("SYSTEM") or metadata.get("System"),
+        "collection_type": metadata.get("COLLECTION_TYPE"),
+        "scan_time": typed_fields.get("SYS_DATE_TIME"),
+        "gps_lock": typed_fields.get("GPS_LOCK"),
+        "mcc": typed_fields.get("MCC"),
+        "mnc": typed_fields.get("MNC"),
+        "lac": typed_fields.get("LAC"),
+        "cid": typed_fields.get("CID"),
+        "tac": typed_fields.get("TAC"),
+        "eci": typed_fields.get("ECI"),
+        "band": typed_fields.get("BAND"),
+        "arfcn": typed_fields.get("ARFCN"),
+        "earfcn": typed_fields.get("EARFCN"),
+        "pci": typed_fields.get("PCI"),
+        "bsic": typed_fields.get("BSIC"),
+        "rssi": typed_fields.get("RSSI"),
+        "rsrp": typed_fields.get("RSRP"),
+        "rsrq": typed_fields.get("RSRQ"),
+        "collection_location": collection_location,
+        "collection_geo": collection_geo,
+        "collection_location_meaning": "collector_system_location",
+        "collection_location_warning": (
+            "Collection location is the collection platform/system location. "
+            "It is not the tower, phone, subscriber, or emitting-device location."
+        ),
+    }
+    document["source_fingerprint"] = build_source_fingerprint(document)
+    return {key: value for key, value in document.items() if value is not None}
+
+
 def normalize_gsm_document(doc):
     """Normalize a GSM export record into the flattened fields used by search/table/map views."""
     attachments = doc.get("attachments") if isinstance(doc.get("attachments"), list) else []
@@ -652,26 +889,49 @@ def enrich_documents(
             "organization_code": organization_code,
             "ingested_at": ingested_at,
             "pipeline": "ingest-api",
+            "recognized_file_type": "cellular_collect",
+            "target_database": MONGO_DB_NAME,
+            "target_collection": MONGO_COLLECTION_NAME,
         }
         if default_location_payload and not document_has_locations(doc):
             enriched_doc["_ingest"]["default_gps_applied"] = True
         yield enriched_doc
 
 
-def insert_documents(documents):
+def enrich_survey_documents(documents, final_filename, collector_code, organization_code):
+    """Yield cellular survey documents with ingest metadata attached."""
+    ingested_at = datetime.now(timezone.utc).isoformat()
+
+    for doc in documents:
+        enriched_doc = dict(doc)
+        enriched_doc["_ingest"] = {
+            "source_filename": final_filename,
+            "collector_code": collector_code,
+            "organization_code": organization_code,
+            "ingested_at": ingested_at,
+            "pipeline": "ingest-api",
+            "recognized_file_type": "cellular_survey",
+            "target_database": CELL_SURVEY_DB_NAME,
+            "target_collection": CELL_SURVEY_COLLECTION_NAME,
+        }
+        yield enriched_doc
+
+
+def insert_documents(documents, collection=None):
     """Insert documents into Mongo in batches and return the inserted count."""
+    target_collection = collection or mongo_collection
     inserted_count = 0
     batch = []
 
     for document in documents:
         batch.append(document)
         if len(batch) >= BATCH_SIZE:
-            result = mongo_collection.insert_many(batch, ordered=False)
+            result = target_collection.insert_many(batch, ordered=False)
             inserted_count += len(result.inserted_ids)
             batch = []
 
     if batch:
-        result = mongo_collection.insert_many(batch, ordered=False)
+        result = target_collection.insert_many(batch, ordered=False)
         inserted_count += len(result.inserted_ids)
 
     return inserted_count
@@ -707,6 +967,8 @@ def health():
         "mongo": mongo_ok,
         "database": MONGO_DB_NAME,
         "collection": MONGO_COLLECTION_NAME,
+        "cell_survey_database": CELL_SURVEY_DB_NAME,
+        "cell_survey_collection": CELL_SURVEY_COLLECTION_NAME,
     }), 200
 
 
@@ -714,7 +976,7 @@ def health():
 @app.post("/api/ingest/upload")
 @admin_token_required
 def upload_files():
-    """Upload, stage, normalize, and insert one or more JSON files."""
+    """Upload, stage, recognize, normalize, and insert one or more ingest files."""
     try:
         collector_code = validate_collector_code(request.form.get("collector_code"))
         organization_code = validate_organization_code(request.form.get("organization_code"))
@@ -746,15 +1008,17 @@ def upload_files():
             results.append({
                 "original_name": original_name,
                 "status": "error",
-                "error": "Only .json files are allowed.",
+                "error": "Only .json, .gns, and .g3ns files are allowed.",
             })
             continue
 
         staged_path = None
         try:
+            file_type = recognize_file_type(safe_original_name)
+            extension = get_file_extension(safe_original_name)
             ts = get_file_timestamp(uploaded_file)
             base_name = build_base_filename(organization_code, collector_code, ts)
-            final_filename = get_unique_filename(base_name, ".json")
+            final_filename = get_unique_filename(base_name, extension)
 
             staged_path = stage_uploaded_file(uploaded_file, final_filename)
 
@@ -762,21 +1026,42 @@ def upload_files():
                 raw = f.read()
 
             text = raw.decode("utf-8-sig")
-            parsed = json.loads(text)
-            documents = normalize_ingest_payload(parsed)
-            inserted_count = insert_documents(
-                enrich_documents(
-                    documents=documents,
-                    final_filename=final_filename,
-                    collector_code=collector_code,
-                    organization_code=organization_code,
-                    default_location_payload=default_location_payload,
+            if file_type == "cellular_collect":
+                parsed = json.loads(text)
+                documents = normalize_ingest_payload(parsed)
+                target_database = MONGO_DB_NAME
+                target_collection = MONGO_COLLECTION_NAME
+                inserted_count = insert_documents(
+                    enrich_documents(
+                        documents=documents,
+                        final_filename=final_filename,
+                        collector_code=collector_code,
+                        organization_code=organization_code,
+                        default_location_payload=default_location_payload,
+                    )
                 )
-            )
+            elif file_type == "cellular_survey":
+                documents = parse_cellular_survey(text, final_filename)
+                target_database = CELL_SURVEY_DB_NAME
+                target_collection = CELL_SURVEY_COLLECTION_NAME
+                inserted_count = insert_documents(
+                    enrich_survey_documents(
+                        documents=documents,
+                        final_filename=final_filename,
+                        collector_code=collector_code,
+                        organization_code=organization_code,
+                    ),
+                    collection=cell_survey_collection,
+                )
+            else:
+                raise ValueError("Unrecognized file type.")
 
             results.append({
                 "original_name": original_name,
                 "final_filename": final_filename,
+                "recognized_file_type": file_type,
+                "database": target_database,
+                "collection": target_collection,
                 "status": "success",
                 "inserted_count": inserted_count,
             })

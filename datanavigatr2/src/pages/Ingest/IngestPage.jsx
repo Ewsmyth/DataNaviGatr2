@@ -49,8 +49,8 @@ const DEFAULT_GPS_TYPES = {
 /*
  * Standalone ingest screen for admins.
  * It authenticates against the main API, verifies the user has the admin role,
- * then uploads JSON files plus collector/organization/default GPS metadata to
- * the ingest service.
+ * then uploads recognized ingest files plus collector/organization/default GPS
+ * metadata to the ingest service.
  */
 function IngestPage() {
   /*
@@ -169,7 +169,7 @@ function IngestPage() {
    */
   async function handleIngestUpload(files) {
     if (!files || files.length === 0) {
-      setMessage("Please choose at least one JSON file.");
+      setMessage("Please choose at least one .json, .gns, or .g3ns file.");
       return;
     }
 
@@ -233,7 +233,7 @@ function IngestPage() {
         <div className="ingest-page-card">
           <div className="ingest-page-header">
             <h1>Ingest</h1>
-            <p>Upload one or more JSON files to the standalone ingest service.</p>
+            <p>Upload cellular collect JSON or cellular survey GNS/G3NS files.</p>
           </div>
 
           {!isAdmin ? (
@@ -294,11 +294,11 @@ function IngestPage() {
             }}
           >
             <label className="ingest-file-field">
-              <span>JSON File(s)</span>
+              <span>Ingest File(s)</span>
               <input
                 type="file"
                 name="json_files"
-                accept=".json,application/json"
+                accept=".json,.gns,.g3ns,application/json"
                 multiple
               />
             </label>

@@ -298,6 +298,8 @@ services:
       MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD}@mongodb:27017/ingestion_db?authSource=admin
       MONGO_DB_NAME: ingestion_db
       MONGO_COLLECTION_NAME: records
+      CELL_SURVEY_DB_NAME: cell_survey
+      CELL_SURVEY_COLLECTION_NAME: records
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       CORS_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost}
       UPLOAD_TMP_DIR: /tmp/ingest_uploads
