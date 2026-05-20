@@ -5,6 +5,7 @@ import LandingPage from "../../pages/Landing/LandingPage";
 import DataViewPage from "../../pages/DataView/DataViewPage";
 import GeoNaviGatrPage from "../../pages/GeoNaviGatr/GeoNaviGatrPage";
 import QueryWorkspacePage from "../../pages/QueryWorkspace/QueryWorkspacePage";
+import BalancedCagePage from "../../pages/BalancedCage/BalancedCagePage";
 
 /*
  * Central route table for the React app.
@@ -29,6 +30,7 @@ function AppRouter() {
       <Route path="/app/geo/:queryId" element={<GeoNaviGatrPage />} />
       <Route path="/ingest" element={<IngestPage />} />
       <Route path="/dataview" element={<DataViewPage />} />
+      <Route path="/balancedcage" element={<BalancedCagePage />} />
     </Routes>
   );
 }
