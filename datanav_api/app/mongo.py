@@ -31,6 +31,13 @@ def get_mongo_db():
     return client[db_name]
 
 
+def get_cell_survey_db():
+    """Return the Mongo database that stores survey records and tower estimates."""
+    client = get_mongo_client()
+    db_name = os.getenv("CELL_SURVEY_DB_NAME", "cell_survey")
+    return client[db_name]
+
+
 def ping_mongo():
     """Run a lightweight ping command used by health endpoints."""
     client = get_mongo_client()

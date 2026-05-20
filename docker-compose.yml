@@ -48,6 +48,7 @@ services:
       MONGO_COLLECTION_NAME: records
       CELL_SURVEY_DB_NAME: cell_survey
       CELL_SURVEY_COLLECTION_NAME: records
+      CELL_TOWERS_COLLECTION_NAME: towers
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-jwt}
       CORS_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost}
       UPLOAD_TMP_DIR: /tmp/ingest_uploads
@@ -67,6 +68,8 @@ services:
       DATABASE_URL: postgresql+psycopg://datanav_user:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/datanav
       MONGO_URI: mongodb://admin:${MONGO_ROOT_PASSWORD:-change-me-mongo}@mongodb:27017/ingestion_db?authSource=admin
       MONGO_DB_NAME: ingestion_db
+      CELL_SURVEY_DB_NAME: cell_survey
+      CELL_TOWERS_COLLECTION_NAME: towers
       APP_ENV: ${APP_ENV:-development}
       ALLOW_PUBLIC_REGISTRATION: ${ALLOW_PUBLIC_REGISTRATION:-false}
       SECRET_KEY: ${SECRET_KEY:-change-me-secret}

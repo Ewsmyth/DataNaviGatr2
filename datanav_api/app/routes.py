@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from collections import Counter
+import re
+import os
 
 from flask import Blueprint, current_app, g, jsonify, request
 
@@ -989,6 +991,148 @@ def _first_present(*values):
 def _ensure_dataview_indexes(collection):
     """Keep DataView range queries on ingest time from scanning the full collection."""
     collection.create_index("_ingest.ingested_at", background=True)
+
+
+def _ensure_balancedcage_indexes(collection):
+    """Keep BalancedCage tower lookups indexed for GCI and geo searches."""
+    collection.create_index("tower_id", background=True)
+    collection.create_index("protocol", background=True)
+    collection.create_index("mcc", background=True)
+    collection.create_index("mnc", background=True)
+    collection.create_index("area_code", background=True)
+    collection.create_index("cell_id", background=True)
+    collection.create_index("channel", background=True)
+    collection.create_index([("estimated_location", "2dsphere")], background=True)
+
+
+def _partial_match_filter(field_name, value):
+    """Build a case-insensitive partial string match for user-entered GCI fields."""
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return None
+    return {field_name: {"$regex": re.escape(cleaned), "$options": "i"}}
+
+
+def _parse_float_arg(name):
+    """Parse an optional query-string float."""
+    value = request.args.get(name)
+    if value in [None, ""]:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a number.")
+
+
+def _tower_to_response(tower):
+    """Convert a Mongo tower estimate document into the BalancedCage API shape."""
+    location = tower.get("estimated_location") if isinstance(tower.get("estimated_location"), dict) else {}
+    coordinates = location.get("coordinates") if isinstance(location.get("coordinates"), list) else []
+    longitude = coordinates[0] if len(coordinates) > 0 else tower.get("estimated_longitude")
+    latitude = coordinates[1] if len(coordinates) > 1 else tower.get("estimated_latitude")
+
+    return {
+        "id": str(tower.get("_id")),
+        "towerId": tower.get("tower_id"),
+        "protocol": tower.get("protocol"),
+        "mcc": tower.get("mcc"),
+        "mnc": tower.get("mnc"),
+        "lac": tower.get("area_code"),
+        "cid": tower.get("cell_id"),
+        "arfcn": tower.get("channel"),
+        "latitude": latitude,
+        "longitude": longitude,
+        "confidenceRadiusM": tower.get("confidence_radius_m"),
+        "observationCount": tower.get("observation_count"),
+        "timingAdvanceObservationCount": tower.get("timing_advance_observation_count"),
+        "rssiMin": tower.get("rssi_min"),
+        "rssiMax": tower.get("rssi_max"),
+        "lastSeen": tower.get("last_observed_at"),
+        "updatedAt": tower.get("updated_at"),
+        "towerModel": tower.get("tower_model"),
+    }
+
+
+@api_bp.route("/api/balancedcage/towers", methods=["GET"])
+def balancedcage_towers():
+    """Query calculated towers from the long-lived cell_survey.towers collection."""
+    from .mongo import get_cell_survey_db
+
+    try:
+        limit = min(max(int(request.args.get("limit", 100)), 1), 500)
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit must be a whole number."}), 400
+
+    try:
+        west = _parse_float_arg("west")
+        south = _parse_float_arg("south")
+        east = _parse_float_arg("east")
+        north = _parse_float_arg("north")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    query = {}
+    for field_name, arg_name in (
+        ("mcc", "mcc"),
+        ("mnc", "mnc"),
+        ("area_code", "lac"),
+        ("cell_id", "cid"),
+        ("channel", "arfcn"),
+    ):
+        field_filter = _partial_match_filter(field_name, request.args.get(arg_name))
+        if field_filter:
+            query.update(field_filter)
+
+    bbox_values = [west, south, east, north]
+    if any(value is not None for value in bbox_values):
+        if any(value is None for value in bbox_values):
+            return jsonify({"error": "west, south, east, and north are all required for geo queries."}), 400
+        if not (-180 <= west <= 180 and -180 <= east <= 180 and -90 <= south <= 90 and -90 <= north <= 90):
+            return jsonify({"error": "Geo bounds are outside valid latitude/longitude ranges."}), 400
+        if west >= east or south >= north:
+            return jsonify({"error": "Geo bounds must use west < east and south < north."}), 400
+
+        query["estimated_location"] = {
+            "$geoWithin": {
+                "$box": [[west, south], [east, north]],
+            }
+        }
+
+    db_mongo = get_cell_survey_db()
+    collection_name = os.getenv("CELL_TOWERS_COLLECTION_NAME", "towers")
+    collection = db_mongo[collection_name]
+    _ensure_balancedcage_indexes(collection)
+
+    projection = {
+        "tower_id": 1,
+        "tower_model": 1,
+        "protocol": 1,
+        "mcc": 1,
+        "mnc": 1,
+        "area_code": 1,
+        "cell_id": 1,
+        "channel": 1,
+        "estimated_location": 1,
+        "estimated_latitude": 1,
+        "estimated_longitude": 1,
+        "confidence_radius_m": 1,
+        "observation_count": 1,
+        "timing_advance_observation_count": 1,
+        "rssi_min": 1,
+        "rssi_max": 1,
+        "last_observed_at": 1,
+        "updated_at": 1,
+    }
+    cursor = collection.find(query, projection).sort("updated_at", -1).limit(limit)
+    towers = [_tower_to_response(tower) for tower in cursor]
+
+    return jsonify({
+        "towers": towers,
+        "count": len(towers),
+        "limit": limit,
+        "database": "cell_survey",
+        "collection": collection_name,
+    }), 200
 
 
 @api_bp.route("/api/dataview/metrics", methods=["GET"])

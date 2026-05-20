@@ -733,6 +733,15 @@ body {
   color: var(--muted);
 }
 
+.balancedcage-message {
+  margin-bottom: 14px;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 8px;
+  background: rgba(248, 113, 113, 0.08);
+  color: var(--text);
+  padding: 10px 12px;
+}
+
 @media (max-width: 700px) {
   .landing-button-grid {
     grid-template-columns: 1fr;

@@ -1,73 +1,14 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-const SAMPLE_RESULTS = [
-  {
-    id: "bc-001",
-    mcc: "515",
-    mnc: "03",
-    lac: "21241",
-    cid: "20454",
-    arfcn: "695",
-    band: "GSM 1800 DCS",
-    rssi: "-83.5",
-    latitude: 18.403898,
-    longitude: 122.126087,
-    lastSeen: "2026-05-09T02:38:42",
-  },
-  {
-    id: "bc-002",
-    mcc: "515",
-    mnc: "02",
-    lac: "27810",
-    cid: "47819",
-    arfcn: "673",
-    band: "GSM 1800 DCS",
-    rssi: "-62.2",
-    latitude: 18.403899,
-    longitude: 122.126088,
-    lastSeen: "2026-05-09T02:38:43",
-  },
-  {
-    id: "bc-003",
-    mcc: "310",
-    mnc: "260",
-    lac: "44012",
-    cid: "77820",
-    arfcn: "512",
-    band: "LTE",
-    rssi: "-71.4",
-    latitude: 18.40712,
-    longitude: 122.13241,
-    lastSeen: "2026-05-09T03:12:09",
-  },
-  {
-    id: "bc-004",
-    mcc: "515",
-    mnc: "02",
-    lac: "27810",
-    cid: "17819",
-    arfcn: "21",
-    band: "GSM 900 RGSM",
-    rssi: "-60.2",
-    latitude: 18.399412,
-    longitude: 122.118233,
-    lastSeen: "2026-05-09T02:38:42",
-  },
-  {
-    id: "bc-005",
-    mcc: "440",
-    mnc: "10",
-    lac: "18201",
-    cid: "99204",
-    arfcn: "1300",
-    band: "LTE",
-    rssi: "-92.0",
-    latitude: 18.414232,
-    longitude: 122.14291,
-    lastSeen: "2026-05-09T04:05:31",
-  },
-];
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL ?? "";
+
+const BALANCEDCAGE_MAP_BOUNDS = {
+  north: 18.46,
+  south: 18.35,
+  west: 122.07,
+  east: 122.18,
+};
 
 const GCI_FIELDS = [
   { key: "mcc", label: "MCC" },
@@ -101,10 +42,25 @@ function buildBox(start, end) {
   };
 }
 
-function matchesPartial(value, query) {
-  const cleanQuery = query.trim().toLowerCase();
-  if (!cleanQuery) return true;
-  return String(value || "").toLowerCase().includes(cleanQuery);
+function boxToGeoBounds(box) {
+  if (!box) return null;
+  const { north, south, west, east } = BALANCEDCAGE_MAP_BOUNDS;
+  const lonSpan = east - west;
+  const latSpan = north - south;
+
+  return {
+    west: west + (box.left / 100) * lonSpan,
+    east: west + ((box.left + box.width) / 100) * lonSpan,
+    north: north - (box.top / 100) * latSpan,
+    south: north - ((box.top + box.height) / 100) * latSpan,
+  };
+}
+
+function formatNumber(value, digits = 1) {
+  if (value === null || value === undefined || value === "") return "Unknown";
+  const numberValue = Number(value);
+  if (Number.isNaN(numberValue)) return String(value);
+  return numberValue.toFixed(digits);
 }
 
 function BalancedCagePage() {
@@ -119,24 +75,60 @@ function BalancedCagePage() {
   const [geoBox, setGeoBox] = useState(null);
   const [dragStart, setDragStart] = useState(null);
   const [dragEnd, setDragEnd] = useState(null);
+  const [towers, setTowers] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
   const activeBox = dragStart ? buildBox(dragStart, dragEnd || dragStart) : geoBox;
-  const hasGciQuery = Object.values(gciValues).some((value) => value.trim());
-  const hasGeoQuery = Boolean(geoBox);
+  const geoBounds = useMemo(() => boxToGeoBounds(geoBox), [geoBox]);
 
-  const filteredResults = useMemo(() => {
-    if (queryMode === "gci" && hasGciQuery) {
-      return SAMPLE_RESULTS.filter((result) =>
-        GCI_FIELDS.every(({ key }) => matchesPartial(result[key], gciValues[key]))
-      );
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = new URLSearchParams({ limit: "200" });
+
+    if (queryMode === "gci") {
+      GCI_FIELDS.forEach(({ key }) => {
+        const value = gciValues[key].trim();
+        if (value) params.set(key, value);
+      });
     }
 
-    if (queryMode === "geo" && hasGeoQuery) {
-      return SAMPLE_RESULTS.slice(0, 3);
+    if (queryMode === "geo" && geoBounds) {
+      params.set("west", String(geoBounds.west));
+      params.set("south", String(geoBounds.south));
+      params.set("east", String(geoBounds.east));
+      params.set("north", String(geoBounds.north));
     }
 
-    return SAMPLE_RESULTS;
-  }, [gciValues, hasGciQuery, hasGeoQuery, queryMode]);
+    async function loadTowers() {
+      setIsLoading(true);
+      setMessage("");
+
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/balancedcage/towers?${params.toString()}`,
+          { signal: controller.signal }
+        );
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to load towers.");
+        }
+        setTowers(data.towers || []);
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          setTowers([]);
+          setMessage(error.message || "Failed to load towers.");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadTowers();
+    return () => controller.abort();
+  }, [gciValues, geoBounds, queryMode]);
 
   function updateGciValue(key, value) {
     setGciValues((currentValues) => ({
@@ -259,9 +251,9 @@ function BalancedCagePage() {
             </div>
 
             <div className="balancedcage-geo-readout">
-              {geoBox
-                ? `Box ${geoBox.width.toFixed(1)} x ${geoBox.height.toFixed(1)}`
-                : "Draw a box to stage a geo query."}
+              {geoBounds
+                ? `${geoBounds.south.toFixed(5)}, ${geoBounds.west.toFixed(5)} to ${geoBounds.north.toFixed(5)}, ${geoBounds.east.toFixed(5)}`
+                : "Draw a box to query calculated tower locations."}
             </div>
           </section>
         )}
@@ -270,47 +262,51 @@ function BalancedCagePage() {
       <section className="balancedcage-results">
         <header className="balancedcage-results-header">
           <div>
-            <span>Frontend prototype</span>
-            <h2>Query Results</h2>
+            <span>cell_survey.towers</span>
+            <h2>Calculated Towers</h2>
           </div>
-          <strong>{filteredResults.length.toLocaleString()} records</strong>
+          <strong>{isLoading ? "Loading" : `${towers.length.toLocaleString()} towers`}</strong>
         </header>
+
+        {message && <div className="balancedcage-message">{message}</div>}
 
         <div className="balancedcage-table-wrap">
           <table className="balancedcage-table">
             <thead>
               <tr>
                 <th>GCI</th>
-                <th>ARFCN</th>
-                <th>Band</th>
-                <th>RSSI</th>
-                <th>Collection Location</th>
+                <th>Channel</th>
+                <th>Protocol</th>
+                <th>Observations</th>
+                <th>Confidence</th>
+                <th>Tower Location</th>
                 <th>Last Seen</th>
               </tr>
             </thead>
             <tbody>
-              {filteredResults.map((result) => (
-                <tr key={result.id}>
+              {towers.map((tower) => (
+                <tr key={tower.id || tower.towerId}>
                   <td>
                     <strong>
-                      {result.mcc}-{result.mnc}-{result.lac}-{result.cid}
+                      {tower.mcc}-{tower.mnc}-{tower.lac}-{tower.cid}
                     </strong>
                   </td>
-                  <td>{result.arfcn}</td>
-                  <td>{result.band}</td>
-                  <td>{result.rssi}</td>
+                  <td>{tower.arfcn || "Unknown"}</td>
+                  <td>{tower.protocol || "Unknown"}</td>
+                  <td>{tower.observationCount ?? 0}</td>
+                  <td>{formatNumber(tower.confidenceRadiusM, 1)} m</td>
                   <td>
-                    {result.latitude.toFixed(6)}, {result.longitude.toFixed(6)}
+                    {formatNumber(tower.latitude, 6)}, {formatNumber(tower.longitude, 6)}
                   </td>
-                  <td>{result.lastSeen}</td>
+                  <td>{tower.lastSeen || tower.updatedAt || "Unknown"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        {filteredResults.length === 0 && (
-          <div className="balancedcage-empty">No local sample records match this query.</div>
+        {!isLoading && towers.length === 0 && (
+          <div className="balancedcage-empty">No calculated towers match this query.</div>
         )}
       </section>
     </main>
